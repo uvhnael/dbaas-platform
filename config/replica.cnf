@@ -1,0 +1,40 @@
+[mysqld]
+# Server ID (must be unique - will be overridden by container)
+server-id=2
+
+# Relay Logging
+relay-log=mysql-relay-bin
+
+# GTID Configuration
+gtid-mode=ON
+enforce-gtid-consistency=ON
+log-slave-updates=ON
+
+# Orchestrator Discovery - IMPORTANT for replica detection
+# report-host will be set dynamically via container hostname
+report-port=3306
+
+# Semi-Synchronous Replication
+rpl_semi_sync_slave_enabled=1
+
+# InnoDB Settings
+innodb_buffer_pool_size=1G
+innodb_log_file_size=256M
+innodb_flush_log_at_trx_commit=2
+innodb_flush_method=O_DIRECT
+
+# Performance
+innodb_read_io_threads=4
+innodb_write_io_threads=4
+
+# Connections
+max_connections=500
+max_connect_errors=1000000
+
+# Character Set
+character-set-server=utf8mb4
+collation-server=utf8mb4_unicode_ci
+
+# Read-Only (Replica is read-only)
+read-only=ON
+super-read-only=ON

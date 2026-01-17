@@ -1,0 +1,95 @@
+datadir="/var/lib/proxysql"
+
+admin_variables=
+{
+    admin_credentials="admin:admin;radmin:radmin"
+    mysql_ifaces="0.0.0.0:6032"
+    refresh_interval=2000
+}
+
+mysql_variables=
+{
+    threads=4
+    max_connections=2048
+    default_query_delay=0
+    default_query_timeout=36000000
+    have_compress=true
+    poll_timeout=2000
+    interfaces="0.0.0.0:6033;0.0.0.0:6034"
+    default_schema="information_schema"
+    stacksize=1048576
+    server_version="8.0.32"
+    connect_timeout_server=3000
+    monitor_username="monitor"
+    monitor_password="monitor_password"
+    monitor_history=600000
+    monitor_connect_interval=60000
+    monitor_ping_interval=10000
+    monitor_read_only_interval=1500
+    monitor_read_only_timeout=500
+    ping_interval_server_msec=120000
+    ping_timeout_server=500
+    commands_stats=true
+    sessions_sort=true
+    connect_retries_on_failure=10
+}
+
+# MySQL Users
+mysql_users=
+(
+    {
+        username = "app_user"
+        password = "app_password"
+        default_hostgroup = 10
+        max_connections = 1000
+        default_schema = "appdb"
+        active = 1
+    },
+    {
+        username = "monitor"
+        password = "monitor_password"
+        default_hostgroup = 10
+        max_connections = 100
+        active = 1
+    }
+)
+
+# Hostgroups:
+# 10 = Write (Master)
+# 20 = Read (Replicas)
+
+# Query Rules for Read/Write Splitting
+mysql_query_rules=
+(
+    {
+        rule_id = 1
+        active = 1
+        match_pattern = "^SELECT .* FOR UPDATE"
+        destination_hostgroup = 10
+        apply = 1
+    },
+    {
+        rule_id = 2
+        active = 1
+        match_pattern = "^SELECT"
+        destination_hostgroup = 20
+        apply = 1
+    },
+    {
+        rule_id = 3
+        active = 1
+        match_pattern = ".*"
+        destination_hostgroup = 10
+        apply = 1
+    }
+)
+
+# Replication Hostgroups for automatic failover
+mysql_replication_hostgroups=
+(
+    {
+        writer_hostgroup = 10
+        reader_hostgroup = 20
+        comment = "MySQL Replication Hostgroups"
+    }
+)

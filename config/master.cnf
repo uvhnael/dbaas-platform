@@ -1,0 +1,41 @@
+[mysqld]
+# Server ID (must be unique)
+server-id=1
+
+# Binary Logging
+log-bin=mysql-bin
+binlog-format=ROW
+binlog-row-image=FULL
+expire_logs_days=7
+
+# GTID Configuration
+gtid-mode=ON
+enforce-gtid-consistency=ON
+log-slave-updates=ON
+
+# Semi-Synchronous Replication
+rpl_semi_sync_master_enabled=1
+rpl_semi_sync_master_timeout=1000
+
+# InnoDB Settings
+innodb_buffer_pool_size=1G
+innodb_log_file_size=256M
+innodb_flush_log_at_trx_commit=2
+innodb_flush_method=O_DIRECT
+
+# Performance
+innodb_read_io_threads=4
+innodb_write_io_threads=4
+sync_binlog=0
+binlog_cache_size=4M
+
+# Connections
+max_connections=500
+max_connect_errors=1000000
+
+# Character Set
+character-set-server=utf8mb4
+collation-server=utf8mb4_unicode_ci
+
+# Read-Only (Master is NOT read-only)
+read-only=OFF

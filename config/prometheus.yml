@@ -1,0 +1,46 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+
+rule_files:
+  - "/etc/prometheus/alerts/*.yml"
+
+scrape_configs:
+  # Prometheus self-monitoring
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # DBaaS API monitoring
+  - job_name: "dbaas-api"
+    metrics_path: "/api/actuator/prometheus"
+    static_configs:
+      - targets: ["dbaas-api:8080"]
+
+  # MySQL Exporter (dynamic discovery)
+  - job_name: "mysql"
+    static_configs:
+      - targets: ["mysql-exporter:9104"]
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+
+  # ProxySQL Exporter
+  - job_name: "proxysql"
+    static_configs:
+      - targets: ["proxysql-exporter:42004"]
+
+  # Node Exporter (host metrics)
+  - job_name: "node"
+    static_configs:
+      - targets: ["node-exporter:9100"]
+
+  # Docker metrics
+  - job_name: "docker"
+    static_configs:
+      - targets: ["cadvisor:8080"]

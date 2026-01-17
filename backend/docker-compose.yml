@@ -1,0 +1,44 @@
+version: "3.8"
+
+# DBaaS Backend - Development Dependencies
+# Run with: docker-compose up -d
+
+services:
+  # PostgreSQL - Required for production profile
+  postgres:
+    image: postgres:15-alpine
+    container_name: dbaas-postgres
+    environment:
+      POSTGRES_DB: dbaas
+      POSTGRES_USER: dbaas
+      POSTGRES_PASSWORD: dbaas_secret
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dbaas"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Orchestrator - MySQL HA Failover
+  orchestrator:
+    image: openarkcode/orchestrator:latest
+    container_name: dbaas-orchestrator
+    ports:
+      - "3000:3000"
+    volumes:
+      - orchestrator-data:/var/lib/orchestrator
+      - ../config/orchestrator.conf.json:/etc/orchestrator.conf.json:ro
+    networks:
+      - dbaas-shared
+
+networks:
+  dbaas-shared:
+    name: dbaas-shared
+    external: true
+
+volumes:
+  postgres-data:
+  orchestrator-data:
