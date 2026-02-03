@@ -12,6 +12,7 @@ interface AuthContextType {
   login: (data: LoginRequest) => Promise<void>;
   register: (data: RegisterRequest) => Promise<void>;
   logout: () => void;
+  refreshUser: () => void;
   token: string | null;
 }
 
@@ -30,7 +31,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // Fetch current user when token exists
-  const { data: userResponse, isLoading: isLoadingUser, refetch } = useGetCurrentUser({
+  const { data: userResponse, isLoading: isLoadingUser, refetch, isError } = useGetCurrentUser({
     query: {
       enabled: !!token && isInitialized,
       retry: false,
@@ -39,25 +40,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const user = userResponse?.data || null;
 
+  // If API returns error, clear invalid token
+  useEffect(() => {
+    if (isError && token && isInitialized) {
+      console.log('Auth token invalid, clearing...');
+      localStorage.removeItem('auth_token');
+      setToken(null);
+    }
+  }, [isError, token, isInitialized]);
+
   const loginMutation = useLogin();
   const registerMutation = useRegister();
 
   const login = useCallback(async (data: LoginRequest) => {
+    console.log('Login called with:', data);
     return new Promise<void>((resolve, reject) => {
+      console.log('Calling loginMutation.mutate...');
       loginMutation.mutate(
         { data },
         {
           onSuccess: (response) => {
+            console.log('Login success:', response);
             if (response.data?.token) {
               localStorage.setItem('auth_token', response.data.token);
               setToken(response.data.token);
               refetch();
               resolve();
             } else {
+              console.error('No token in response');
               reject(new Error('No token received'));
             }
           },
           onError: (error) => {
+            console.error('Login error:', error);
             reject(error);
           },
         }
@@ -94,13 +109,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     router.push('/login');
   }, [router]);
 
+  const refreshUser = useCallback(() => {
+    refetch();
+  }, [refetch]);
+
   const value: AuthContextType = {
     user,
-    isLoading: !isInitialized || (!!token && isLoadingUser),
+    isLoading: !isInitialized || (isInitialized && !!token && isLoadingUser && !isError),
     isAuthenticated: !!user,
     login,
     register,
     logout,
+    refreshUser,
     token,
   };
 
