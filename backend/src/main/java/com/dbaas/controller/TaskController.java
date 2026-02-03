@@ -1,5 +1,6 @@
 package com.dbaas.controller;
 
+import com.dbaas.exception.TaskNotFoundException;
 import com.dbaas.model.Task;
 import com.dbaas.model.dto.ApiResponse;
 import com.dbaas.repository.TaskRepository;
@@ -40,7 +41,7 @@ public class TaskController {
     @Operation(summary = "Get task details")
     public ResponseEntity<ApiResponse<Task>> getTask(@PathVariable String taskId) {
         Task task = taskRepository.findById(taskId)
-                .orElseThrow(() -> new RuntimeException("Task not found: " + taskId));
+                .orElseThrow(() -> new TaskNotFoundException(taskId));
         return ResponseEntity.ok(ApiResponse.success(task));
     }
 }

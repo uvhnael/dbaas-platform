@@ -1,13 +1,10 @@
 package com.dbaas.controller;
 
 import com.dbaas.model.Cluster;
-import com.dbaas.model.Node;
-import com.dbaas.model.NodeStatus;
 import com.dbaas.model.dto.ApiResponse;
-import com.dbaas.repository.NodeRepository;
 import com.dbaas.service.ClusterService;
 import com.dbaas.service.NotificationService;
-import com.dbaas.service.ProxySQLService;
+import com.dbaas.service.cluster.FailoverService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -16,7 +13,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
-import java.util.Optional;
 
 /**
  * Controller for handling Orchestrator webhooks.
@@ -30,9 +26,8 @@ import java.util.Optional;
 public class WebhookController {
 
     private final ClusterService clusterService;
-    private final ProxySQLService proxySQLService;
+    private final FailoverService failoverService;
     private final NotificationService notificationService;
-    private final NodeRepository nodeRepository;
 
     /**
      * Handle Orchestrator topology-recovery webhook.
@@ -41,7 +36,7 @@ public class WebhookController {
     @PostMapping("/orchestrator/topology-recovery")
     @Operation(summary = "Handle Orchestrator topology recovery event")
     public ResponseEntity<ApiResponse<Void>> handleTopologyRecovery(@RequestBody Map<String, Object> event) {
-        log.info("Received topology-recovery event: {}", event);
+        log.debug("Received topology-recovery event: {}", event);
 
         try {
             String clusterId = extractClusterId(event);
@@ -53,23 +48,10 @@ public class WebhookController {
                 return ResponseEntity.ok(ApiResponse.success("Event received but cluster ID not found"));
             }
 
-            Cluster cluster = clusterService.getCluster(clusterId);
+            Cluster cluster = clusterService.getClusterInternal(clusterId);
 
-            // 1. Update node status in database
-            updateNodeStatuses(cluster, oldMasterHost, newMasterHost);
-
-            // 2. Reconfigure ProxySQL to point to new master
-            if (newMasterHost != null) {
-                proxySQLService.updateMaster(cluster, newMasterHost);
-            }
-
-            // 3. Notify via WebSocket
-            notificationService.notifyFailover(cluster,
-                    oldMasterHost != null ? oldMasterHost : "unknown",
-                    newMasterHost != null ? newMasterHost : "unknown");
-
-            log.info("Topology recovery handled for cluster {}: {} -> {}",
-                    clusterId, oldMasterHost, newMasterHost);
+            // Delegate to FailoverService
+            failoverService.handleTopologyRecovery(cluster, oldMasterHost, newMasterHost);
 
             return ResponseEntity.ok(ApiResponse.success("Topology recovery processed successfully"));
 
@@ -82,58 +64,72 @@ public class WebhookController {
     @PostMapping("/orchestrator/failover")
     @Operation(summary = "Handle Orchestrator failover event")
     public ResponseEntity<ApiResponse<Void>> handleFailover(@RequestBody Map<String, Object> event) {
-        log.info("Received failover event: {}", event);
+        // Parse fields from Orchestrator PostFailoverProcesses webhook
+        // Expected fields: ClusterAlias, SuccessorHost, SuccessorPort, FailedHost,
+        // FailureType
+        String clusterAlias = (String) event.get("ClusterAlias");
+        String successorHost = (String) event.get("SuccessorHost");
+        String failedHost = (String) event.get("FailedHost");
+        String failureType = (String) event.get("FailureType");
 
-        String clusterId = extractClusterId(event);
-        String newMasterHost = (String) event.get("SuccessorHost");
+        log.info("Failover event: cluster={}, failed={}, successor={}, type={}",
+                clusterAlias, failedHost, successorHost, failureType);
 
-        if (clusterId != null && newMasterHost != null) {
-            try {
-                Cluster cluster = clusterService.getCluster(clusterId);
-
-                // Update ProxySQL to point to new master
-                proxySQLService.updateMaster(cluster, newMasterHost);
-
-                // Notify via WebSocket
-                notificationService.notifyFailover(cluster, "previous-master", newMasterHost);
-
-                log.info("Failover handled for cluster: {}, new master: {}",
-                        clusterId, newMasterHost);
-
-                return ResponseEntity.ok(ApiResponse.success("Failover processed successfully"));
-
-            } catch (Exception e) {
-                log.error("Failed to handle failover event", e);
-                return ResponseEntity.ok(ApiResponse.error("PROCESSING_ERROR", e.getMessage()));
+        // Extract cluster ID from ClusterAlias (format: mysql-{clusterId})
+        String clusterId = null;
+        if (clusterAlias != null && clusterAlias.startsWith("mysql-")) {
+            clusterId = clusterAlias.replace("mysql-", "");
+        } else {
+            // Fallback: try to extract from SuccessorHost or FailedHost
+            clusterId = failoverService.extractClusterIdFromHostname(successorHost);
+            if (clusterId == null) {
+                clusterId = failoverService.extractClusterIdFromHostname(failedHost);
             }
         }
 
-        return ResponseEntity.ok(ApiResponse.success("Failover event received"));
+        if (clusterId == null) {
+            log.warn("Could not extract cluster ID from failover event");
+            return ResponseEntity.ok(ApiResponse.error("INVALID_PAYLOAD", "Could not determine cluster ID"));
+        }
+
+        if (successorHost == null || successorHost.isEmpty()) {
+            log.warn("No successor host in failover event");
+            return ResponseEntity.ok(ApiResponse.error("INVALID_PAYLOAD", "No successor host specified"));
+        }
+
+        try {
+            Cluster cluster = clusterService.getClusterInternal(clusterId);
+
+            // Delegate all business logic to FailoverService
+            failoverService.handleFailover(cluster, failedHost, successorHost);
+
+            return ResponseEntity.ok(ApiResponse.success("Failover processed successfully"));
+
+        } catch (Exception e) {
+            log.error("Failed to handle failover event for cluster {}: {}", clusterId, e.getMessage(), e);
+            return ResponseEntity.ok(ApiResponse.error("PROCESSING_ERROR", e.getMessage()));
+        }
     }
 
     @PostMapping("/orchestrator/recovery")
     @Operation(summary = "Handle Orchestrator recovery event")
     public ResponseEntity<ApiResponse<Void>> handleRecovery(@RequestBody Map<String, Object> event) {
-        log.info("Received recovery event: {}", event);
+        log.debug("Received recovery event: {}", event);
         return ResponseEntity.ok(ApiResponse.success("Recovery event received"));
     }
 
     @PostMapping("/prometheus/alert")
     @Operation(summary = "Handle Prometheus alert")
     public ResponseEntity<ApiResponse<Void>> handlePrometheusAlert(@RequestBody Map<String, Object> alert) {
-        log.info("Received Prometheus alert: {}", alert);
-
         try {
             @SuppressWarnings("unchecked")
             Map<String, Object> labels = (Map<String, Object>) alert.get("labels");
             String alertName = labels != null ? (String) labels.get("alertname") : null;
 
             if ("HighCPUUsage".equals(alertName)) {
-                log.info("High CPU alert - consider scaling");
                 notificationService.notifyTelegram("⚠️ High CPU Alert",
                         "One or more clusters are experiencing high CPU usage.");
             } else if ("HighMemoryUsage".equals(alertName)) {
-                log.info("High Memory alert - consider scaling");
                 notificationService.notifyTelegram("⚠️ High Memory Alert",
                         "One or more clusters are experiencing high memory usage.");
             }
@@ -141,35 +137,8 @@ public class WebhookController {
             return ResponseEntity.ok(ApiResponse.success("Alert processed"));
 
         } catch (Exception e) {
-            log.warn("Failed to process Prometheus alert", e);
+            log.warn("Failed to process Prometheus alert: {}", e.getMessage());
             return ResponseEntity.ok(ApiResponse.error("PROCESSING_ERROR", e.getMessage()));
-        }
-    }
-
-    /**
-     * Update node statuses after failover.
-     */
-    private void updateNodeStatuses(Cluster cluster, String oldMasterHost, String newMasterHost) {
-        // Update old master to FAILED status
-        if (oldMasterHost != null) {
-            Optional<Node> oldMaster = nodeRepository.findByContainerName(oldMasterHost);
-            oldMaster.ifPresent(node -> {
-                node.setStatus(NodeStatus.FAILED);
-                nodeRepository.save(node);
-                notificationService.notifyNodeStatus(node);
-                log.info("Marked old master {} as FAILED", oldMasterHost);
-            });
-        }
-
-        // Update new master to RUNNING status
-        if (newMasterHost != null) {
-            Optional<Node> newMaster = nodeRepository.findByContainerName(newMasterHost);
-            newMaster.ifPresent(node -> {
-                node.setStatus(NodeStatus.RUNNING);
-                nodeRepository.save(node);
-                notificationService.notifyNodeStatus(node);
-                log.info("Marked new master {} as RUNNING", newMasterHost);
-            });
         }
     }
 
