@@ -1,15 +1,21 @@
 package com.dbaas.service;
 
+import com.dbaas.exception.DockerOperationException;
 import com.dbaas.model.Cluster;
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.command.CreateContainerResponse;
 import com.github.dockerjava.api.command.InspectContainerResponse;
 import com.github.dockerjava.api.model.*;
+import io.github.resilience4j.retry.Retry;
+import io.github.resilience4j.retry.RetryConfig;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 
@@ -24,6 +30,10 @@ public class DockerService {
 
     private final DockerClient dockerClient;
 
+    @Lazy
+    @Autowired
+    private SecretService secretService;
+
     @Value("${cluster.defaults.mysql-version:8.0}")
     private String defaultMysqlVersion;
 
@@ -31,31 +41,61 @@ public class DockerService {
     private String defaultMemoryLimit;
 
     /**
-     * Create a MySQL container (master or replica).
+     * Create a MySQL container (master or replica) with custom resource
+     * configuration.
+     *
+     * @param clusterId    The cluster identifier
+     * @param role         The role of the container (master or replica-N)
+     * @param mysqlVersion The MySQL version to use
+     * @param networkId    The Docker network to attach to
+     * @param cpuCores     Number of CPU cores for the container
+     * @param memory       Memory limit (e.g., "4G", "8G")
+     * @param storage      Storage size for data volume (e.g., "10G", "100G")
+     * @return Container ID
      */
     public String createMySQLContainer(
             String clusterId,
             String role,
             String mysqlVersion,
-            String networkId) {
+            String networkId,
+            int cpuCores,
+            String memory,
+            String storage) {
 
         String containerName = String.format("mysql-%s-%s", clusterId, role);
         String imageName = "mysql:" + mysqlVersion;
 
-        log.info("Creating MySQL container: {}", containerName);
+        log.info("Creating MySQL container: {} with {} vCPU, {} RAM, {} storage",
+                containerName, cpuCores, memory, storage);
 
-        // Pull image if not exists
+        // 1. Pull image if not exists
         pullImageIfNeeded(imageName);
 
-        // Server ID (unique per container)
+        // 2. Server ID & Password
         int serverId = role.equals("master") ? 1 : Integer.parseInt(role.replace("replica-", "")) + 1;
+        String rootPassword = secretService != null
+                ? secretService.generateMySQLRootPassword(clusterId)
+                : "root_" + clusterId + "_pwd";
 
-        // Environment variables
         Map<String, String> envVars = Map.of(
-                "MYSQL_ROOT_PASSWORD", generatePassword(clusterId),
+                "MYSQL_ROOT_PASSWORD", rootPassword,
                 "MYSQL_DATABASE", "appdb");
 
-        // Create container
+        // 3. Define Volume Path
+        String hostDataPath = "/opt/dbaas/clusters/" + clusterId + "/" + role;
+
+        // Cấu hình Healthcheck để Docker tự biết khi nào DB thực sự "Up"
+        HealthCheck healthCheck = new HealthCheck()
+                .withTest(List.of("CMD-SHELL", "mysqladmin ping -h localhost -uroot -p" + rootPassword))
+                .withInterval(10_000_000_000L) // 10 giây
+                .withTimeout(5_000_000_000L) // 5 giây
+                .withRetries(3);
+
+        // Calculate CPU quota (1 core = 100000 microseconds per 100ms period)
+        long cpuPeriod = 100000L; // 100ms in microseconds
+        long cpuQuota = cpuCores * cpuPeriod;
+
+        // 4. Create container with custom resources
         CreateContainerResponse container = dockerClient.createContainerCmd(imageName)
                 .withName(containerName)
                 .withHostName(containerName)
@@ -65,10 +105,18 @@ public class DockerService {
                 .withLabels(Map.of(
                         "dbaas.cluster.id", clusterId,
                         "dbaas.role", role,
-                        "dbaas.managed", "true"))
+                        "dbaas.managed", "true",
+                        "dbaas.cpu", String.valueOf(cpuCores),
+                        "dbaas.memory", memory,
+                        "dbaas.storage", storage))
+                .withHealthcheck(healthCheck)
                 .withHostConfig(HostConfig.newHostConfig()
                         .withNetworkMode(networkId)
-                        .withMemory(parseMemory(defaultMemoryLimit))
+                        .withMemory(parseMemory(memory))
+                        .withMemorySwap(parseMemory(memory)) // Disable swap
+                        .withCpuPeriod(cpuPeriod)
+                        .withCpuQuota(cpuQuota)
+                        .withBinds(Bind.parse(hostDataPath + ":/var/lib/mysql"))
                         .withRestartPolicy(RestartPolicy.unlessStoppedRestart()))
                 .withCmd(
                         "--server-id=" + serverId,
@@ -79,15 +127,43 @@ public class DockerService {
                         "--log-slave-updates=ON",
                         "--report-host=" + containerName,
                         "--report-port=3306",
+                        "--character-set-server=utf8mb4",
+                        "--collation-server=utf8mb4_unicode_ci",
+                        // Configure InnoDB buffer pool based on available memory
+                        "--innodb-buffer-pool-size=" + calculateBufferPoolSize(memory),
                         role.equals("master") ? "--read-only=OFF" : "--read-only=ON")
                 .exec();
 
-        // Start container
+        // 5. Start container
         dockerClient.startContainerCmd(container.getId()).exec();
 
-        log.info("MySQL container '{}' started with ID: {}", containerName, container.getId());
+        log.info("MySQL container '{}' started with ID: {}. Resources: {} vCPU, {} RAM. Data: {}",
+                containerName, container.getId(), cpuCores, memory, hostDataPath);
 
         return container.getId();
+    }
+
+    /**
+     * Create a MySQL container with default resources (backward compatibility).
+     */
+    public String createMySQLContainer(
+            String clusterId,
+            String role,
+            String mysqlVersion,
+            String networkId) {
+        return createMySQLContainer(clusterId, role, mysqlVersion, networkId, 2, defaultMemoryLimit, "10G");
+    }
+
+    /**
+     * Calculate InnoDB buffer pool size (typically 70-80% of available memory).
+     */
+    private String calculateBufferPoolSize(String memory) {
+        long bytes = parseMemory(memory);
+        // Use 70% of memory for buffer pool
+        long bufferPoolBytes = (long) (bytes * 0.7);
+        // Convert to MB for MySQL config
+        long bufferPoolMB = bufferPoolBytes / (1024 * 1024);
+        return bufferPoolMB + "M";
     }
 
     /**
@@ -147,55 +223,74 @@ public class DockerService {
     /**
      * Setup MySQL Primary with all required users.
      * Creates replication user and orchestrator user on master.
+     * Uses Resilience4j Retry for non-blocking retry with proper backoff.
      * 
      * @param cluster The cluster to configure
      */
     public void setupPrimary(Cluster cluster) {
         log.info("Setting up MySQL Primary for cluster: {}", cluster.getId());
 
-        String password = generatePassword(cluster.getId());
+        String clusterId = cluster.getId();
 
-        // Wait for MySQL to be ready (retry up to 30 seconds)
-        int maxRetries = 6;
-        int retryDelayMs = 5000;
+        String password = secretService != null
+                ? secretService.generateMySQLRootPassword(clusterId)
+                : generatePassword(clusterId);
 
-        for (int attempt = 1; attempt <= maxRetries; attempt++) {
-            try {
-                log.info("Setting up Primary (attempt {}/{})", attempt, maxRetries);
+        // Generate unique passwords per cluster using SecretService
+        String replicationPassword = secretService != null
+                ? secretService.generateReplicationPassword(clusterId)
+                : generatePassword(clusterId + ":repl");
 
-                // Create all required users on primary
-                String sql =
-                        // Replication User (use mysql_native_password for compatibility)
-                        "CREATE USER IF NOT EXISTS 'repl'@'%' IDENTIFIED WITH mysql_native_password BY 'repl_password';"
-                                +
-                                "GRANT REPLICATION SLAVE ON *.* TO 'repl'@'%';" +
-                                // Orchestrator User (must match orchestrator.conf.json)
-                                "CREATE USER IF NOT EXISTS 'orchestrator'@'%' IDENTIFIED BY 'orch_password';" +
-                                "GRANT SUPER, PROCESS, REPLICATION SLAVE, REPLICATION CLIENT, RELOAD ON *.* TO 'orchestrator'@'%';"
-                                +
-                                "GRANT SELECT ON mysql.slave_master_info TO 'orchestrator'@'%';" +
-                                "FLUSH PRIVILEGES;";
+        String orchestratorPassword = secretService != null
+                ? secretService.generateOrchestratorPassword(clusterId)
+                : generatePassword(clusterId + ":orch");
 
+        String appUserPassword = secretService != null
+                ? secretService.generateAppUserPassword(clusterId)
+                : generatePassword(clusterId + ":app");
+
+        String appUser = cluster.getDbUser() != null ? cluster.getDbUser() : "app_user";
+
+        // Create all required users on primary with unique per-cluster passwords
+        // SECURITY: Escape all passwords to prevent SQL injection via special
+        // characters
+        String sql =
+                // Replication User (use mysql_native_password for compatibility)
+                "CREATE USER IF NOT EXISTS 'repl'@'%' IDENTIFIED WITH mysql_native_password BY '"
+                        + escapeSqlString(replicationPassword) + "';" +
+                        "GRANT REPLICATION SLAVE ON *.* TO 'repl'@'%';" +
+                        // Orchestrator User (must match orchestrator.conf.json)
+                        "CREATE USER IF NOT EXISTS 'orchestrator'@'%' IDENTIFIED BY '"
+                        + escapeSqlString(orchestratorPassword) + "';" +
+                        "GRANT SUPER, PROCESS, REPLICATION SLAVE, REPLICATION CLIENT, RELOAD ON *.* TO 'orchestrator'@'%';"
+                        +
+                        "GRANT SELECT ON mysql.slave_master_info TO 'orchestrator'@'%';" +
+                        // Application User for client connections via ProxySQL
+                        "CREATE USER IF NOT EXISTS '" + escapeSqlString(appUser)
+                        + "'@'%' IDENTIFIED WITH mysql_native_password BY '" + escapeSqlString(appUserPassword) + "';" +
+                        "GRANT ALL PRIVILEGES ON *.* TO '" + escapeSqlString(appUser) + "'@'%';" +
+                        "FLUSH PRIVILEGES;";
+
+        // Use Resilience4j Retry instead of Thread.sleep
+        RetryConfig retryConfig = RetryConfig.custom()
+                .maxAttempts(6)
+                .waitDuration(Duration.ofSeconds(5))
+                .retryExceptions(Exception.class)
+                .build();
+
+        Retry retry = Retry.of("setupPrimary-" + cluster.getId(), retryConfig);
+
+        try {
+            Retry.decorateRunnable(retry, () -> {
+                log.info("Setting up Primary for cluster: {}", cluster.getId());
                 execInContainer(cluster.getMasterContainerId(),
                         "mysql", "-uroot", "-p" + password, "-e", sql);
-
                 log.info("MySQL Primary setup completed successfully");
-                return;
-
-            } catch (Exception e) {
-                log.warn("Failed to setup Primary (attempt {}): {}", attempt, e.getMessage());
-                if (attempt < maxRetries) {
-                    try {
-                        Thread.sleep(retryDelayMs);
-                    } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                        break;
-                    }
-                }
-            }
+            }).run();
+        } catch (Exception e) {
+            log.error("Failed to setup MySQL Primary after all retry attempts: {}", e.getMessage());
+            throw new DockerOperationException("Failed to setup MySQL Primary", e);
         }
-
-        log.error("Failed to setup MySQL Primary after {} attempts", maxRetries);
     }
 
     /**
@@ -220,9 +315,19 @@ public class DockerService {
      * @param replicaContainerId The container ID of the replica to configure
      */
     public void setupReplicaReplication(Cluster cluster, String replicaContainerId) {
-        String masterHost = "mysql-" + cluster.getId() + "-master";
-        String password = generatePassword(cluster.getId());
+        String clusterId = cluster.getId();
+        String masterHost = "mysql-" + clusterId + "-master";
 
+        String password = secretService != null
+                ? secretService.generateMySQLRootPassword(clusterId)
+                : generatePassword(clusterId);
+
+        // Use unique replication password per cluster
+        String replicationPassword = secretService != null
+                ? secretService.generateReplicationPassword(clusterId)
+                : generatePassword(clusterId + ":repl");
+
+        // SECURITY: Escape password to prevent SQL injection
         String replicationSql = String.format(
                 "STOP REPLICA; " +
                         "RESET SLAVE ALL; " +
@@ -230,10 +335,10 @@ public class DockerService {
                         "CHANGE REPLICATION SOURCE TO " +
                         "SOURCE_HOST='%s', " +
                         "SOURCE_USER='repl', " +
-                        "SOURCE_PASSWORD='repl_password', " +
+                        "SOURCE_PASSWORD='%s', " +
                         "SOURCE_AUTO_POSITION=1; " +
                         "START REPLICA;",
-                masterHost);
+                escapeSqlString(masterHost), escapeSqlString(replicationPassword));
 
         execInContainer(replicaContainerId, "mysql", "-uroot", "-p" + password, "-e", replicationSql);
         log.info("Replication configured for replica: {}", replicaContainerId);
@@ -252,9 +357,27 @@ public class DockerService {
     public boolean isContainerHealthy(String containerId) {
         try {
             InspectContainerResponse info = dockerClient.inspectContainerCmd(containerId).exec();
-            return Boolean.TRUE.equals(info.getState().getRunning());
+            InspectContainerResponse.ContainerState state = info.getState();
+
+            // 1. Kiểm tra nếu container không còn chạy
+            if (!Boolean.TRUE.equals(state.getRunning())) {
+                return false;
+            }
+
+            // 2. Kiểm tra Health Status từ Docker (do ta đã cấu hình .withHealthcheck)
+            // Các trạng thái có thể có: "starting", "healthy", "unhealthy"
+            if (state.getHealth() != null) {
+                String status = state.getHealth().getStatus();
+                log.debug("Container {} health status: {}", containerId, status);
+                return "healthy".equals(status);
+            }
+
+            // 3. Dự phòng: Nếu container không có cấu hình healthcheck,
+            // thì ít nhất nó phải đang chạy và không ở trạng thái Restarting
+            return Boolean.TRUE.equals(state.getRunning()) && !Boolean.TRUE.equals(state.getRestarting());
+
         } catch (Exception e) {
-            log.warn("Failed to check container health: {}", containerId);
+            log.warn("Không thể kiểm tra sức khỏe container: {}", containerId);
             return false;
         }
     }
@@ -299,6 +422,35 @@ public class DockerService {
     }
 
     /**
+     * Get the published (host) port for a container's internal port.
+     * 
+     * @param containerName The container name
+     * @param internalPort  The internal port to look up
+     * @return The published host port, or null if not found
+     */
+    public Integer getPublishedPort(String containerName, int internalPort) {
+        try {
+            var containers = dockerClient.listContainersCmd()
+                    .withNameFilter(List.of(containerName))
+                    .exec();
+            if (!containers.isEmpty()) {
+                var container = containers.get(0);
+                var ports = container.getPorts();
+                if (ports != null) {
+                    for (var port : ports) {
+                        if (port.getPrivatePort() != null && port.getPrivatePort() == internalPort) {
+                            return port.getPublicPort();
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.error("Failed to get published port for container {}: {}", containerName, e.getMessage());
+        }
+        return null;
+    }
+
+    /**
      * Start a container.
      */
     public void startContainer(String containerId) {
@@ -307,7 +459,7 @@ public class DockerService {
             log.info("Container started: {}", containerId);
         } catch (Exception e) {
             log.error("Failed to start container: {}", containerId, e);
-            throw new RuntimeException("Failed to start container: " + containerId);
+            throw new DockerOperationException("startContainer", containerId, e.getMessage());
         }
     }
 
@@ -320,7 +472,7 @@ public class DockerService {
             log.info("Container stopped: {}", containerId);
         } catch (Exception e) {
             log.error("Failed to stop container: {}", containerId, e);
-            throw new RuntimeException("Failed to stop container: " + containerId);
+            throw new DockerOperationException("stopContainer", containerId, e.getMessage());
         }
     }
 
@@ -358,7 +510,7 @@ public class DockerService {
             return "OK";
         } catch (Exception e) {
             log.error("Exec failed in container {}: {}", containerId, e.getMessage());
-            throw new RuntimeException("Exec failed: " + e.getMessage());
+            throw new DockerOperationException("execInContainer", containerId, e.getMessage());
         }
     }
 
@@ -536,6 +688,22 @@ public class DockerService {
     private String generatePassword(String clusterId) {
         // In production, use proper secret management
         return "root_" + clusterId + "_pwd";
+    }
+
+    /**
+     * Escape single quotes in SQL strings to prevent SQL injection.
+     * Used when concatenating values into SQL statements executed via mysql CLI.
+     *
+     * @param input The string to escape
+     * @return Escaped string safe for SQL
+     */
+    private String escapeSqlString(String input) {
+        if (input == null) {
+            return null;
+        }
+        // Escape single quotes by doubling them (SQL standard)
+        // Also escape backslashes which MySQL treats specially
+        return input.replace("\\", "\\\\").replace("'", "''");
     }
 
     private long parseMemory(String memory) {

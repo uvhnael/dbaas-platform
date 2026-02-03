@@ -95,4 +95,42 @@ public class UserService implements UserDetailsService {
         userRepository.save(user);
         log.info("Password updated for user: {}", user.getUsername());
     }
+
+    /**
+     * Validate user's current password.
+     */
+    public boolean validatePassword(String userId, String password) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new IllegalArgumentException("User not found: " + userId));
+        return passwordEncoder.matches(password, user.getPasswordHash());
+    }
+
+    /**
+     * Update user profile (email, displayName).
+     */
+    @Transactional
+    public User updateProfile(String userId, String email, String displayName) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new IllegalArgumentException("User not found: " + userId));
+
+        if (email != null && !email.isBlank()) {
+            user.setEmail(email);
+        }
+        // Note: displayName field can be added to User entity if needed
+
+        User saved = userRepository.save(user);
+        log.info("Profile updated for user: {}", user.getUsername());
+        return saved;
+    }
+
+    /**
+     * Change user password with validation of current password.
+     */
+    @Transactional
+    public void changePassword(String userId, String currentPassword, String newPassword) {
+        if (!validatePassword(userId, currentPassword)) {
+            throw new IllegalArgumentException("Current password is incorrect");
+        }
+        updatePassword(userId, newPassword);
+    }
 }

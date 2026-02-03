@@ -1,5 +1,6 @@
 package com.dbaas.service;
 
+import com.dbaas.exception.OrchestratorException;
 import com.dbaas.model.Cluster;
 import com.dbaas.model.TopologyInfo;
 import lombok.RequiredArgsConstructor;
@@ -25,6 +26,7 @@ public class OrchestratorService {
 
     /**
      * Register a cluster with Orchestrator for monitoring.
+     * Throws RuntimeException on failure to enable retry logic.
      */
     public void registerCluster(Cluster cluster) {
         log.info("Registering cluster with Orchestrator: {}", cluster.getId());
@@ -39,10 +41,15 @@ public class OrchestratorService {
                 log.info("Cluster registered with Orchestrator: {}", cluster.getId());
             } else {
                 log.warn("Orchestrator registration returned: {}", response.getStatusCode());
+                throw new OrchestratorException("registerCluster", cluster.getId(),
+                        "Registration failed with status: " + response.getStatusCode());
             }
 
+        } catch (OrchestratorException e) {
+            throw e; // Re-throw our custom exception
         } catch (Exception e) {
             log.error("Failed to register cluster with Orchestrator: {}", cluster.getId(), e);
+            throw new OrchestratorException("registerCluster", e);
         }
     }
 
@@ -51,13 +58,23 @@ public class OrchestratorService {
      */
     public void unregisterCluster(Cluster cluster) {
         log.info("Unregistering cluster from Orchestrator: {}", cluster.getId());
-
+        for (int i = 0; i < cluster.getReplicaCount(); i++) {
+            String replicaHost = "mysql-" + cluster.getId() + "-replica-" + i;
+            unregisterNode(replicaHost);
+        }
         String masterHost = "mysql-" + cluster.getId() + "-master";
-        String forgetUrl = orchestratorUrl + "/api/forget/" + masterHost + "/3306";
+        unregisterNode(masterHost);
+
+    }
+
+    public void unregisterNode(String nodeName) {
+        log.info("Unregistering node from Orchestrator: {}", nodeName);
+
+        String forgetUrl = orchestratorUrl + "/api/forget/" + nodeName + "/3306";
 
         try {
             restTemplate.getForEntity(forgetUrl, String.class);
-            log.info("Cluster unregistered from Orchestrator: {}", cluster.getId());
+            log.info("Node unregistered from Orchestrator: {}", nodeName);
         } catch (Exception e) {
             log.warn("Failed to unregister from Orchestrator: {}", e.getMessage());
         }
