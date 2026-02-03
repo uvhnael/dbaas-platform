@@ -7,3 +7,6 @@ export { NodesTable } from './NodesTable';
 export { DeleteClusterDialog } from './DeleteClusterDialog';
 export { TopologyDiagram } from './TopologyDiagram';
 export { NodeDetailDrawer } from './NodeDetailDrawer';
+export { ScaleClusterDialog } from './ScaleClusterDialog';
+export { CreateBackupDialog } from './CreateBackupDialog';
+export { ViewLogsDialog } from './ViewLogsDialog';

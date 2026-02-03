@@ -10,12 +10,12 @@ import {
 import { Node as ClusterNode, NodeRole, NodeStatus } from '@/lib/api/model';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { 
-  Database, 
-  Server, 
-  Layers, 
-  Clock, 
-  Cpu, 
+import {
+  Database,
+  Server,
+  Layers,
+  Clock,
+  Cpu,
   HardDrive,
   RotateCcw,
   Trash2,
@@ -43,24 +43,26 @@ export function NodeDetailDrawer({ node, open, onClose }: NodeDetailDrawerProps)
   const logContainerRef = useRef<HTMLDivElement>(null);
 
   // Fetch real logs from API with polling for live updates
+  // Only poll when drawer is open to save resources
   const { data: logsResponse } = useGetNodeLogs(
     node?.id || '',
     { lines: 100, timestamps: true },
     {
       query: {
         enabled: !!node?.id && open,
-        refetchInterval: 3000,
+        refetchInterval: open ? 5000 : false, // 5s when open, stop when closed
       },
     }
   );
 
   // Fetch real-time container stats
+  // Only poll when drawer is open to save resources
   const { data: statsResponse, isLoading: statsLoading } = useGetNodeStats(
     node?.id || '',
     {
       query: {
         enabled: !!node?.id && open,
-        refetchInterval: 5000,
+        refetchInterval: open ? 8000 : false, // 8s when open, stop when closed
       },
     }
   );
@@ -101,30 +103,30 @@ export function NodeDetailDrawer({ node, open, onClose }: NodeDetailDrawerProps)
   };
 
   const roleConfigs = {
-    [NodeRole.MASTER]: { 
-      text: 'text-emerald-400', 
-      bg: 'bg-emerald-500/10', 
+    [NodeRole.MASTER]: {
+      text: 'text-emerald-400',
+      bg: 'bg-emerald-500/10',
       border: 'border-emerald-500/30',
       glow: 'shadow-emerald-500/20',
       label: 'Master'
     },
-    [NodeRole.REPLICA]: { 
-      text: 'text-blue-400', 
-      bg: 'bg-blue-500/10', 
+    [NodeRole.REPLICA]: {
+      text: 'text-blue-400',
+      bg: 'bg-blue-500/10',
       border: 'border-blue-500/30',
       glow: 'shadow-blue-500/20',
       label: 'Replica'
     },
-    [NodeRole.PROXY]: { 
-      text: 'text-violet-400', 
-      bg: 'bg-violet-500/10', 
+    [NodeRole.PROXY]: {
+      text: 'text-violet-400',
+      bg: 'bg-violet-500/10',
       border: 'border-violet-500/30',
       glow: 'shadow-violet-500/20',
       label: 'ProxySQL'
     },
-    [NodeRole.ORCHESTRATOR]: { 
-      text: 'text-orange-400', 
-      bg: 'bg-orange-500/10', 
+    [NodeRole.ORCHESTRATOR]: {
+      text: 'text-orange-400',
+      bg: 'bg-orange-500/10',
       border: 'border-orange-500/30',
       glow: 'shadow-orange-500/20',
       label: 'Orchestrator'
@@ -208,7 +210,7 @@ export function NodeDetailDrawer({ node, open, onClose }: NodeDetailDrawerProps)
                 <code className="text-[11px] text-zinc-500 font-mono truncate max-w-[280px]">
                   {node.id}
                 </code>
-                <button 
+                <button
                   onClick={() => copyToClipboard(node.id || '')}
                   aria-label="Copy node ID"
                   className="text-zinc-500 hover:text-white transition-colors"
@@ -229,29 +231,29 @@ export function NodeDetailDrawer({ node, open, onClose }: NodeDetailDrawerProps)
               Quick Actions
             </h3>
             <div className="grid grid-cols-3 gap-2">
-              <Button 
-                variant="outline" 
-                size="sm" 
-                onClick={handleRestart} 
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleRestart}
                 className="gap-2 bg-zinc-900/50 border-white/10 text-zinc-300 hover:text-white hover:bg-zinc-800 hover:border-white/20 h-10"
               >
                 <RotateCcw className="w-4 h-4" />
                 Restart
               </Button>
               {node.role === NodeRole.REPLICA && (
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  onClick={handlePromote} 
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handlePromote}
                   className="gap-2 bg-emerald-500/5 border-emerald-500/20 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 hover:border-emerald-500/30 h-10"
                 >
                   <ArrowUpCircle className="w-4 h-4" />
                   Promote
                 </Button>
               )}
-              <Button 
-                variant="outline" 
-                size="sm" 
+              <Button
+                variant="outline"
+                size="sm"
                 className="gap-2 bg-red-500/5 border-red-500/20 text-red-400 hover:text-red-300 hover:bg-red-500/10 hover:border-red-500/30 h-10"
               >
                 <Trash2 className="w-4 h-4" />
@@ -266,7 +268,7 @@ export function NodeDetailDrawer({ node, open, onClose }: NodeDetailDrawerProps)
               <Cpu className="w-3.5 h-3.5" />
               Resource Usage
             </h3>
-            
+
             {/* CPU & Memory with progress bars */}
             <div className="grid grid-cols-2 gap-3 mb-3">
               <MetricWithProgress
@@ -319,15 +321,15 @@ export function NodeDetailDrawer({ node, open, onClose }: NodeDetailDrawerProps)
                   icon={<Clock className="w-4 h-4" />}
                   label="Replication Lag"
                   value={replicationLag !== undefined ? `${replicationLag}s` : '-'}
-                  subtitle={replicationLag !== undefined 
+                  subtitle={replicationLag !== undefined
                     ? replicationLag === 0 ? 'In sync with master' : 'Behind master'
                     : 'Checking...'
                   }
                   progress={replicationLag !== undefined ? Math.min(replicationLag * 5, 100) : 0}
                   color={
                     replicationLag === undefined ? 'blue' :
-                    replicationLag > 10 ? 'red' : 
-                    replicationLag > 5 ? 'amber' : 'emerald'
+                      replicationLag > 10 ? 'red' :
+                        replicationLag > 5 ? 'amber' : 'emerald'
                   }
                 />
               </div>
@@ -363,8 +365,8 @@ export function NodeDetailDrawer({ node, open, onClose }: NodeDetailDrawerProps)
                 </span>
               )}
             </div>
-            
-            <div 
+
+            <div
               ref={logContainerRef}
               className={cn(
                 "h-[280px] rounded-xl p-4 font-mono text-xs overflow-y-auto",
@@ -379,8 +381,8 @@ export function NodeDetailDrawer({ node, open, onClose }: NodeDetailDrawerProps)
                 </div>
               ) : (
                 logLines.map((log, index) => (
-                  <div 
-                    key={index} 
+                  <div
+                    key={index}
                     className={cn(
                       'py-0.5 leading-relaxed tracking-tight',
                       log.includes('ERROR') && 'text-red-400',
@@ -403,19 +405,19 @@ export function NodeDetailDrawer({ node, open, onClose }: NodeDetailDrawerProps)
 }
 
 // Metric card with progress bar
-function MetricWithProgress({ 
-  icon, 
-  label, 
-  value, 
+function MetricWithProgress({
+  icon,
+  label,
+  value,
   subtitle,
-  progress, 
+  progress,
   color = 'emerald'
-}: { 
-  icon: React.ReactNode; 
-  label: string; 
+}: {
+  icon: React.ReactNode;
+  label: string;
   value: string;
   subtitle?: string;
-  progress: number; 
+  progress: number;
   color?: 'emerald' | 'blue' | 'amber' | 'red';
 }) {
   const colorClasses = {
@@ -438,7 +440,7 @@ function MetricWithProgress({
         <p className="text-[10px] text-zinc-500 mb-2">{subtitle}</p>
       )}
       <div className="h-1.5 bg-zinc-800 rounded-full overflow-hidden">
-        <div 
+        <div
           className={cn('h-full rounded-full transition-all duration-500', colorClasses[color])}
           style={{ width: `${Math.min(100, progress)}%` }}
         />
@@ -448,13 +450,13 @@ function MetricWithProgress({
 }
 
 // Simple metric card
-function MetricCard({ 
-  icon, 
-  label, 
-  value 
-}: { 
-  icon: React.ReactNode; 
-  label: string; 
+function MetricCard({
+  icon,
+  label,
+  value
+}: {
+  icon: React.ReactNode;
+  label: string;
   value: React.ReactNode;
 }) {
   return (

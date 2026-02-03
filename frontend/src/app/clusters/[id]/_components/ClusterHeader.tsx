@@ -3,17 +3,24 @@
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/StatusBadge';
-import { Loader2, RefreshCw, Trash2, ChevronRight, AlertTriangle } from 'lucide-react';
+import { Loader2, Play, Square, Trash2, ChevronRight, AlertTriangle } from 'lucide-react';
 import { Cluster } from '@/lib/api/model';
 
 interface ClusterHeaderProps {
   cluster: Cluster;
-  onRestart: () => void;
+  onStart: () => void;
+  onStop: () => void;
   onDelete: () => void;
-  isRestarting: boolean;
+  isStarting: boolean;
+  isStopping: boolean;
 }
 
-export function ClusterHeader({ cluster, onRestart, onDelete, isRestarting }: ClusterHeaderProps) {
+export function ClusterHeader({ cluster, onStart, onStop, onDelete, isStarting, isStopping }: ClusterHeaderProps) {
+  // Determine button states based on cluster status
+  const canStart = cluster.status === 'STOPPED';
+  const canStop = cluster.status === 'RUNNING' || cluster.status === 'HEALTHY' || cluster.status === 'DEGRADED';
+  const isTransitioning = cluster.status === 'PROVISIONING' || cluster.status === 'SCALING' || cluster.status === 'DELETING';
+
   return (
     <>
       {/* Breadcrumb */}
@@ -30,30 +37,50 @@ export function ClusterHeader({ cluster, onRestart, onDelete, isRestarting }: Cl
         <div>
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold text-white tracking-tight">{cluster.name}</h1>
-            <StatusBadge status={cluster.status} />
+            <StatusBadge status={cluster.status ?? 'PROVISIONING'} />
           </div>
           <p className="text-sm text-zinc-500 mt-1 font-mono">{cluster.id}</p>
         </div>
         <div className="flex items-center gap-2">
+          {/* Start Button - only enabled when STOPPED */}
           <Button 
             variant="outline" 
             size="sm" 
-            onClick={onRestart}
-            disabled={isRestarting}
-            className="bg-transparent border-white/10 text-zinc-300 hover:text-white hover:bg-white/5"
+            onClick={onStart}
+            disabled={!canStart || isStarting || isTransitioning}
+            className="bg-transparent border-emerald-500/20 text-emerald-400 hover:text-emerald-300 hover:bg-emerald-500/10 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {isRestarting ? (
+            {isStarting ? (
               <Loader2 className="w-4 h-4 animate-spin mr-2" />
             ) : (
-              <RefreshCw className="w-4 h-4 mr-2" />
+              <Play className="w-4 h-4 mr-2" />
             )}
-            Restart
+            Start
           </Button>
+          
+          {/* Stop Button - only enabled when RUNNING/HEALTHY/DEGRADED */}
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={onStop}
+            disabled={!canStop || isStopping || isTransitioning}
+            className="bg-transparent border-amber-500/20 text-amber-400 hover:text-amber-300 hover:bg-amber-500/10 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isStopping ? (
+              <Loader2 className="w-4 h-4 animate-spin mr-2" />
+            ) : (
+              <Square className="w-4 h-4 mr-2" />
+            )}
+            Stop
+          </Button>
+          
+          {/* Delete Button */}
           <Button 
             variant="outline" 
             size="sm" 
             onClick={onDelete}
-            className="bg-transparent border-red-500/20 text-red-400 hover:text-red-300 hover:bg-red-500/10"
+            disabled={isTransitioning}
+            className="bg-transparent border-red-500/20 text-red-400 hover:text-red-300 hover:bg-red-500/10 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Trash2 className="w-4 h-4 mr-2" />
             Delete
@@ -74,3 +101,4 @@ export function ClusterHeader({ cluster, onRestart, onDelete, isRestarting }: Cl
     </>
   );
 }
+

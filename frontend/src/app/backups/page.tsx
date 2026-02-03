@@ -2,16 +2,17 @@
 
 import { useState, useMemo } from 'react';
 import Link from 'next/link';
-import { useClusters, useClusterBackups } from '@/lib/api';
-import { 
-  Table, 
-  TableBody, 
-  TableCell, 
-  TableHead, 
-  TableHeader, 
-  TableRow 
+import { useClusters, useClusterBackups, useCreateBackup, useRestoreBackup, useDeleteBackup } from '@/lib/api';
+import { useQueryClient } from '@tanstack/react-query';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow
 } from '@/components/ui/table';
-import { 
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -21,38 +22,46 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { 
-  Select, 
-  SelectContent, 
-  SelectItem, 
-  SelectTrigger, 
-  SelectValue 
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
 } from '@/components/ui/select';
-import { 
-  CloudUpload, 
-  Download, 
-  RotateCcw, 
-  Search, 
-  Database, 
-  CheckCircle, 
-  XCircle, 
+import {
+  CloudUpload,
+  Download,
+  RotateCcw,
+  Search,
+  Database,
+  CheckCircle,
+  XCircle,
   Loader2,
   Clock,
   FileBox,
-  MonitorCheck
+  MonitorCheck,
+  Trash2
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { Skeleton } from '@/components/ui/skeleton';
 
 export default function BackupsPage() {
+  const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState('');
   const [clusterFilter, setClusterFilter] = useState('all');
-  const [loading, setLoading] = useState(false);
-  
+  const [backupName, setBackupName] = useState('');
+  const [confirmText, setConfirmText] = useState('');
+
   // Fetch real data from API
   const { data: clusters, isLoading: clustersLoading } = useClusters();
-  
+
+  // API mutations
+  const createBackupMutation = useCreateBackup();
+  const restoreBackupMutation = useRestoreBackup();
+  const deleteBackupMutation = useDeleteBackup();
+
   // Fetch backups for all clusters
   const clusterBackups = clusters?.map(cluster => ({
     clusterId: cluster.id,
@@ -60,21 +69,22 @@ export default function BackupsPage() {
     // eslint-disable-next-line react-hooks/rules-of-hooks
     backups: useClusterBackups(cluster.id)
   })) || [];
-  
+
   // Combine all backups from all clusters
   const allBackups = useMemo(() => {
-    return clusterBackups.flatMap(cb => 
+    return clusterBackups.flatMap(cb =>
       (cb.backups.data || []).map(backup => ({
         ...backup,
         clusterName: cb.clusterName,
+        clusterId: cb.clusterId,
       }))
     );
   }, [clusterBackups]);
-  
+
   // Create Backup Modal
   const [createOpen, setCreateOpen] = useState(false);
-  const [selectedCluster, setSelectedCluster] = useState('production-db');
-  
+  const [selectedCluster, setSelectedCluster] = useState('');
+
   // Restore Modal
   const [restoreOpen, setRestoreOpen] = useState(false);
   const [restoreBackup, setRestoreBackup] = useState<any>(null);
@@ -86,22 +96,56 @@ export default function BackupsPage() {
   });
 
   const handleCreateBackup = async () => {
-    setLoading(true);
-    // Simulate API call
-    setTimeout(() => {
-      setLoading(false);
-      setCreateOpen(false);
+    if (!selectedCluster) {
+      toast.error('Please select a cluster');
+      return;
+    }
+
+    try {
+      await createBackupMutation.mutateAsync({
+        clusterId: selectedCluster,
+        data: { name: backupName || undefined }
+      });
       toast.success('Backup started successfully', { description: 'You will be notified when it completes.' });
-    }, 2000);
+      setCreateOpen(false);
+      setBackupName('');
+      // Refresh backups
+      queryClient.invalidateQueries({ queryKey: [`/api/v1/clusters/${selectedCluster}/backups`] });
+    } catch (error: any) {
+      toast.error('Failed to create backup', { description: error.message });
+    }
   };
 
   const handleRestore = async () => {
-    setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
+    if (confirmText !== 'CONFIRM') {
+      toast.error('Please type CONFIRM to proceed');
+      return;
+    }
+
+    try {
+      await restoreBackupMutation.mutateAsync({
+        clusterId: restoreBackup.clusterId,
+        backupId: restoreBackup.id
+      });
+      toast.success('Restore initiated', { description: `Restoring ${restoreBackup.clusterName} from ${restoreBackup.id}` });
       setRestoreOpen(false);
-      toast.success('Restore initiated', { description: `Restoring ${restoreBackup?.cluster} from ${restoreBackup?.id}` });
-    }, 2000);
+      setConfirmText('');
+    } catch (error: any) {
+      toast.error('Failed to restore backup', { description: error.message });
+    }
+  };
+
+  const handleDeleteBackup = async (backup: any) => {
+    try {
+      await deleteBackupMutation.mutateAsync({
+        clusterId: backup.clusterId,
+        backupId: backup.id
+      });
+      toast.success('Backup deleted');
+      queryClient.invalidateQueries({ queryKey: [`/api/v1/clusters/${backup.clusterId}/backups`] });
+    } catch (error: any) {
+      toast.error('Failed to delete backup', { description: error.message });
+    }
   };
 
   return (
@@ -112,7 +156,7 @@ export default function BackupsPage() {
           <h1 className="text-2xl font-bold text-white tracking-tight">Backups</h1>
           <p className="text-sm text-zinc-500 mt-1">Manage snapshots and point-in-time recovery</p>
         </div>
-        <Button 
+        <Button
           onClick={() => setCreateOpen(true)}
           className="bg-emerald-600 hover:bg-emerald-500 text-white gap-2"
         >
@@ -123,21 +167,21 @@ export default function BackupsPage() {
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <StatsCard 
-          label="Total Storage" 
-          value="1.2 TB" 
+        <StatsCard
+          label="Total Storage"
+          value="1.2 TB"
           icon={<FileBox className="w-4 h-4" />}
           trend="+5.2% this week"
         />
-        <StatsCard 
-          label="Successful Backups" 
-          value="98.5%" 
+        <StatsCard
+          label="Successful Backups"
+          value="98.5%"
           icon={<CheckCircle className="w-4 h-4 text-emerald-400" />}
           status="success"
         />
-        <StatsCard 
-          label="Restoration Time" 
-          value="~15 min" 
+        <StatsCard
+          label="Restoration Time"
+          value="~15 min"
           icon={<Clock className="w-4 h-4 text-blue-400" />}
           subtitle="Avg. over 30 days"
         />
@@ -151,9 +195,9 @@ export default function BackupsPage() {
             <div className="relative w-full max-w-sm">
               <label htmlFor="backup-search" className="sr-only">Search backups</label>
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" aria-hidden="true" />
-              <Input 
+              <Input
                 id="backup-search"
-                placeholder="Search backup ID…" 
+                placeholder="Search backup ID…"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="pl-9 bg-zinc-900/50 border-white/10 text-zinc-300 placeholder:text-zinc-600 focus:border-white/20 focus:ring-0"
@@ -193,10 +237,10 @@ export default function BackupsPage() {
                 filteredBackups.map((backup) => {
                   const sizeInGB = backup.sizeBytes ? (backup.sizeBytes / (1024 ** 3)).toFixed(2) : '0';
                   const createdDate = backup.createdAt ? new Date(backup.createdAt).toLocaleString() : '-';
-                  const duration = backup.createdAt && backup.completedAt 
+                  const duration = backup.createdAt && backup.completedAt
                     ? `${Math.round((new Date(backup.completedAt).getTime() - new Date(backup.createdAt).getTime()) / 60000)}m`
                     : '-';
-                  
+
                   return (
                     <TableRow key={backup.id} className="hover:bg-white/[0.02] border-white/5">
                       <TableCell className="font-mono text-zinc-300 font-medium">{backup.id}</TableCell>
@@ -238,9 +282,9 @@ export default function BackupsPage() {
                           <Button variant="ghost" size="icon" aria-label={`Download backup ${backup.id}`} className="h-8 w-8 text-zinc-400 hover:text-white hover:bg-white/5">
                             <Download className="w-4 h-4" aria-hidden="true" />
                           </Button>
-                          <Button 
-                            variant="ghost" 
-                            size="icon" 
+                          <Button
+                            variant="ghost"
+                            size="icon"
                             aria-label={`Restore backup ${backup.id}`}
                             onClick={() => {
                               setRestoreBackup(backup);
@@ -249,6 +293,16 @@ export default function BackupsPage() {
                             className="h-8 w-8 text-blue-400 hover:text-blue-300 hover:bg-blue-500/10"
                           >
                             <RotateCcw className="w-4 h-4" aria-hidden="true" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label={`Delete backup ${backup.id}`}
+                            onClick={() => handleDeleteBackup(backup)}
+                            disabled={deleteBackupMutation.isPending}
+                            className="h-8 w-8 text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                          >
+                            <Trash2 className="w-4 h-4" aria-hidden="true" />
                           </Button>
                         </div>
                       </TableCell>
@@ -281,14 +335,24 @@ export default function BackupsPage() {
               <label htmlFor="backup-cluster" className="text-sm font-medium text-zinc-300">Select Cluster</label>
               <Select value={selectedCluster} onValueChange={setSelectedCluster}>
                 <SelectTrigger id="backup-cluster" className="bg-zinc-900 border-white/10 text-zinc-200">
-                  <SelectValue />
+                  <SelectValue placeholder="Select a cluster" />
                 </SelectTrigger>
                 <SelectContent className="bg-zinc-900 border-white/10">
-                  <SelectItem value="production-db">production-db</SelectItem>
-                  <SelectItem value="staging-db">staging-db</SelectItem>
-                  <SelectItem value="dev-db-01">dev-db-01</SelectItem>
+                  {clusters?.map(cluster => (
+                    <SelectItem key={cluster.id} value={cluster.id}>{cluster.name}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
+            </div>
+            <div className="space-y-2">
+              <label htmlFor="backup-name" className="text-sm font-medium text-zinc-300">Backup Name (optional)</label>
+              <Input
+                id="backup-name"
+                value={backupName}
+                onChange={(e) => setBackupName(e.target.value)}
+                placeholder="my-backup"
+                className="bg-zinc-900 border-white/10 text-zinc-200"
+              />
             </div>
             <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg">
               <p className="text-xs text-amber-400 flex items-start gap-2">
@@ -299,8 +363,8 @@ export default function BackupsPage() {
           </div>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setCreateOpen(false)} className="text-zinc-400 hover:text-white">Cancel</Button>
-            <Button onClick={handleCreateBackup} disabled={loading} className="bg-emerald-600 hover:bg-emerald-500 text-white">
-              {loading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+            <Button onClick={handleCreateBackup} disabled={createBackupMutation.isPending || !selectedCluster} className="bg-emerald-600 hover:bg-emerald-500 text-white">
+              {createBackupMutation.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
               Start Backup
             </Button>
           </DialogFooter>
@@ -316,28 +380,35 @@ export default function BackupsPage() {
               Are you sure you want to restore <span className="text-white font-mono break-all">{restoreBackup?.id}</span>?
             </DialogDescription>
           </DialogHeader>
-          
+
           <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-lg space-y-2 my-2">
             <h4 className="text-sm font-bold text-red-500 flex items-center gap-2">
               <XCircle className="w-4 h-4" />
               Warning: Destructive Action
             </h4>
             <ul className="text-xs text-red-400 list-disc list-inside space-y-1">
-              <li>Current data on <strong>{restoreBackup?.cluster}</strong> will be overwritten.</li>
+              <li>Current data on <strong>{restoreBackup?.clusterName}</strong> will be overwritten.</li>
               <li>The cluster will be unavailable during restoration.</li>
               <li>This action cannot be undone.</li>
             </ul>
           </div>
 
           <div className="space-y-2">
-             <label htmlFor="confirm-restore" className="text-xs text-zinc-500 uppercase tracking-wider">Type CONFIRM to proceed</label>
-             <Input id="confirm-restore" autoComplete="off" className="bg-zinc-900 border-white/10 text-white placeholder:text-zinc-700" placeholder="CONFIRM" />
+            <label htmlFor="confirm-restore" className="text-xs text-zinc-500 uppercase tracking-wider">Type CONFIRM to proceed</label>
+            <Input
+              id="confirm-restore"
+              autoComplete="off"
+              value={confirmText}
+              onChange={(e) => setConfirmText(e.target.value)}
+              className="bg-zinc-900 border-white/10 text-white placeholder:text-zinc-700"
+              placeholder="CONFIRM"
+            />
           </div>
 
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setRestoreOpen(false)} className="text-zinc-400 hover:text-white">Cancel</Button>
-            <Button onClick={handleRestore} disabled={loading} variant="destructive">
-              {loading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+            <Button variant="ghost" onClick={() => { setRestoreOpen(false); setConfirmText(''); }} className="text-zinc-400 hover:text-white">Cancel</Button>
+            <Button onClick={handleRestore} disabled={restoreBackupMutation.isPending || confirmText !== 'CONFIRM'} variant="destructive">
+              {restoreBackupMutation.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
               Restore Cluster
             </Button>
           </DialogFooter>

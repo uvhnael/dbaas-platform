@@ -18,16 +18,16 @@ export default function ClustersPage() {
   const [activeFilter, setActiveFilter] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
 
-  const filteredClusters = clusters?.filter(cluster => {
-    const matchesFilter = activeFilter === 'All' || 
+  const filteredClusters = (clusters as any[])?.filter((cluster: any) => {
+    const matchesFilter = activeFilter === 'All' ||
       cluster.status.toUpperCase() === activeFilter.toUpperCase();
     const matchesSearch = cluster.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       cluster.id.toLowerCase().includes(searchQuery.toLowerCase());
     return matchesFilter && matchesSearch;
   });
 
-  const runningCount = clusters?.filter(c => c.status === 'RUNNING').length || 0;
-  const degradedCount = clusters?.filter(c => c.status === 'DEGRADED').length || 0;
+  const runningCount = (clusters as any[])?.filter((c: any) => c.status === 'RUNNING').length || 0;
+  const degradedCount = (clusters as any[])?.filter((c: any) => c.status === 'DEGRADED').length || 0;
 
   // Show skeleton while loading
   if (isLoading) {
@@ -60,7 +60,7 @@ export default function ClustersPage() {
   if (!clusters || clusters.length === 0) {
     return (
       <div className="min-h-[60vh] flex items-center justify-center">
-        <EmptyState 
+        <EmptyState
           title="No Clusters Yet"
           description="Create your first MySQL cluster with automatic replication, load balancing, and high availability."
         />
@@ -75,7 +75,7 @@ export default function ClustersPage() {
         <div>
           <h1 className="text-3xl font-bold text-foreground">Clusters</h1>
           <p className="text-muted-foreground mt-1">
-            {clusters.length} clusters • {runningCount} running
+            {(clusters as any[])?.length || 0} clusters • {runningCount} running
             {degradedCount > 0 && <span className="text-yellow-400"> • {degradedCount} degraded</span>}
           </p>
         </div>

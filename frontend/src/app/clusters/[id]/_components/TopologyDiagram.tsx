@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useEffect, useRef } from 'react';
 import {
   ReactFlow,
   Node,
@@ -42,31 +42,31 @@ interface NodeWithStats extends ClusterNode {
 
 // Role configuration - defined outside component to prevent recreation
 const ROLE_CONFIG = {
-  [NodeRole.MASTER]: { 
-    icon: Database, 
-    bg: 'bg-emerald-500/15', 
-    border: 'border-emerald-500/40', 
+  [NodeRole.MASTER]: {
+    icon: Database,
+    bg: 'bg-emerald-500/15',
+    border: 'border-emerald-500/40',
     text: 'text-emerald-400',
     label: 'MASTER'
   },
-  [NodeRole.REPLICA]: { 
-    icon: Server, 
-    bg: 'bg-blue-500/15', 
-    border: 'border-blue-500/40', 
+  [NodeRole.REPLICA]: {
+    icon: Server,
+    bg: 'bg-blue-500/15',
+    border: 'border-blue-500/40',
     text: 'text-blue-400',
     label: 'REPLICA'
   },
-  [NodeRole.PROXY]: { 
-    icon: Layers, 
-    bg: 'bg-violet-500/15', 
-    border: 'border-violet-500/40', 
+  [NodeRole.PROXY]: {
+    icon: Layers,
+    bg: 'bg-violet-500/15',
+    border: 'border-violet-500/40',
     text: 'text-violet-400',
     label: 'PROXY'
   },
-  [NodeRole.ORCHESTRATOR]: { 
-    icon: Layers, 
-    bg: 'bg-orange-500/15', 
-    border: 'border-orange-500/40', 
+  [NodeRole.ORCHESTRATOR]: {
+    icon: Layers,
+    bg: 'bg-orange-500/15',
+    border: 'border-orange-500/40',
     text: 'text-orange-400',
     label: 'ORCHESTRATOR'
   },
@@ -76,7 +76,7 @@ const ROLE_CONFIG = {
 function ClusterNodeComponent({ data }: NodeProps) {
   const node = data.node as NodeWithStats;
   const onNodeClick = data.onNodeClick as ((node: ClusterNode) => void) | undefined;
-  
+
   const config = node.role ? ROLE_CONFIG[node.role] : ROLE_CONFIG[NodeRole.REPLICA];
   const Icon = config.icon;
 
@@ -121,39 +121,39 @@ function ClusterNodeComponent({ data }: NodeProps) {
         >
           {/* Connection Handles - Multiple positions for flexible routing */}
           {/* Top handle */}
-          <Handle 
-            type="target" 
+          <Handle
+            type="target"
             position={Position.Top}
             id="top"
-            className="!w-2.5 !h-2.5 !bg-zinc-600 !border-2 !border-zinc-800 !-top-1" 
+            className="!w-2.5 !h-2.5 !bg-zinc-600 !border-2 !border-zinc-800 !-top-1"
           />
           {/* Bottom handle */}
-          <Handle 
-            type="source" 
+          <Handle
+            type="source"
             position={Position.Bottom}
             id="bottom"
-            className="!w-2.5 !h-2.5 !bg-zinc-600 !border-2 !border-zinc-800 !-bottom-1" 
+            className="!w-2.5 !h-2.5 !bg-zinc-600 !border-2 !border-zinc-800 !-bottom-1"
           />
           {/* Left handle */}
-          <Handle 
-            type="target" 
+          <Handle
+            type="target"
             position={Position.Left}
             id="left"
-            className="!w-2.5 !h-2.5 !bg-zinc-600 !border-2 !border-zinc-800 !-left-1" 
+            className="!w-2.5 !h-2.5 !bg-zinc-600 !border-2 !border-zinc-800 !-left-1"
           />
           {/* Right handle */}
-          <Handle 
-            type="source" 
+          <Handle
+            type="source"
             position={Position.Right}
             id="right"
-            className="!w-2.5 !h-2.5 !bg-zinc-600 !border-2 !border-zinc-800 !-right-1" 
+            className="!w-2.5 !h-2.5 !bg-zinc-600 !border-2 !border-zinc-800 !-right-1"
           />
 
           {/* Status Indicator with Glow */}
           <div className={cn(
             'absolute -top-1.5 -right-1.5 w-3.5 h-3.5 rounded-full border-2 border-zinc-900',
             node.status === NodeStatus.RUNNING && 'bg-emerald-500 shadow-[0_0_8px_2px_rgba(34,197,94,0.4)]',
-            node.status === NodeStatus.SYNCING && 'bg-amber-500 shadow-[0_0_8px_2px_rgba(245,158,11,0.4)] animate-pulse',
+            (node.status === NodeStatus.SYNCING || node.status === NodeStatus.STARTING) && 'bg-amber-500 shadow-[0_0_8px_2px_rgba(245,158,11,0.4)] animate-pulse',
             (node.status === NodeStatus.STOPPED || node.status === NodeStatus.FAILED) && 'bg-red-500 shadow-[0_0_8px_2px_rgba(239,68,68,0.4)]'
           )} />
 
@@ -209,7 +209,7 @@ function ClusterNodeComponent({ data }: NodeProps) {
           </div>
         </div>
       </ContextMenuTrigger>
-      
+
       <ContextMenuContent className="w-48 bg-zinc-900 border-zinc-700">
         <ContextMenuItem onClick={handleViewLogs} className="gap-2 text-zinc-300 focus:text-white focus:bg-zinc-800">
           <FileText className="w-4 h-4" aria-hidden="true" />
@@ -280,7 +280,7 @@ export function TopologyDiagram({ nodes: clusterNodes, clusterId, nodeStats, onN
     const result: Node[] = [];
     const centerX = 300;
 
-    if (proxysql) {
+    if (proxysql && proxysql.id) {
       result.push({
         id: proxysql.id,
         type: 'clusterNode',
@@ -290,7 +290,7 @@ export function TopologyDiagram({ nodes: clusterNodes, clusterId, nodeStats, onN
       });
     }
 
-    if (master) {
+    if (master && master.id) {
       result.push({
         id: master.id,
         type: 'clusterNode',
@@ -305,13 +305,15 @@ export function TopologyDiagram({ nodes: clusterNodes, clusterId, nodeStats, onN
     const startX = centerX - totalWidth / 2 - 80;
 
     replicas.forEach((replica, index) => {
-      result.push({
-        id: replica.id,
-        type: 'clusterNode',
-        position: { x: startX + index * replicaSpacing, y: 340 },
-        data: { node: replica, onNodeClick },
-        draggable: true,
-      });
+      if (replica.id) {
+        result.push({
+          id: replica.id,
+          type: 'clusterNode',
+          position: { x: startX + index * replicaSpacing, y: 340 },
+          data: { node: replica, onNodeClick },
+          draggable: true,
+        });
+      }
     });
 
     return result;
@@ -322,7 +324,7 @@ export function TopologyDiagram({ nodes: clusterNodes, clusterId, nodeStats, onN
     const result: Edge[] = [];
 
     // ProxySQL → Master (Write traffic - solid violet line)
-    if (proxysql && master) {
+    if (proxysql && master && proxysql.id && master.id) {
       result.push({
         id: `${proxysql.id}-${master.id}`,
         source: proxysql.id,
@@ -339,9 +341,9 @@ export function TopologyDiagram({ nodes: clusterNodes, clusterId, nodeStats, onN
 
     // ProxySQL → Replicas (Read traffic - dashed violet line)
     replicas.forEach((replica) => {
-      if (proxysql) {
+      if (proxysql && proxysql.id && replica.id) {
         const isOffline = replica.status === NodeStatus.STOPPED || replica.status === NodeStatus.FAILED;
-        
+
         result.push({
           id: `${proxysql.id}-${replica.id}`,
           source: proxysql.id,
@@ -351,8 +353,8 @@ export function TopologyDiagram({ nodes: clusterNodes, clusterId, nodeStats, onN
           labelStyle: { fill: '#8b5cf6', fontSize: 10, fontWeight: 500 },
           labelBgStyle: { fill: '#18181b', fillOpacity: 0.8 },
           labelBgPadding: [4, 2] as [number, number],
-          style: { 
-            stroke: isOffline ? '#ef4444' : '#8b5cf6', 
+          style: {
+            stroke: isOffline ? '#ef4444' : '#8b5cf6',
             strokeWidth: 2,
             strokeDasharray: '6,4',
           },
@@ -363,10 +365,10 @@ export function TopologyDiagram({ nodes: clusterNodes, clusterId, nodeStats, onN
 
     // Master → Replicas (Replication flow - blue line)
     replicas.forEach((replica) => {
-      if (master) {
+      if (master && master.id && replica.id) {
         const isOffline = replica.status === NodeStatus.STOPPED || replica.status === NodeStatus.FAILED;
-        const isSyncing = replica.status === NodeStatus.SYNCING;
-        
+        const isSyncing = replica.status === NodeStatus.SYNCING || replica.status === NodeStatus.STARTING;
+
         result.push({
           id: `${master.id}-${replica.id}`,
           source: master.id,
@@ -376,8 +378,8 @@ export function TopologyDiagram({ nodes: clusterNodes, clusterId, nodeStats, onN
           labelStyle: { fill: '#3b82f6', fontSize: 10, fontWeight: 500 },
           labelBgStyle: { fill: '#18181b', fillOpacity: 0.8 },
           labelBgPadding: [4, 2] as [number, number],
-          style: { 
-            stroke: isOffline ? '#ef4444' : isSyncing ? '#f59e0b' : '#3b82f6', 
+          style: {
+            stroke: isOffline ? '#ef4444' : isSyncing ? '#f59e0b' : '#3b82f6',
             strokeWidth: 2,
             strokeDasharray: isOffline ? '6,6' : undefined,
           },
@@ -392,6 +394,23 @@ export function TopologyDiagram({ nodes: clusterNodes, clusterId, nodeStats, onN
   // Use React Flow state hooks for draggable nodes
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+
+  // Track previous node/edge structure to prevent infinite loops
+  const prevNodeKeysRef = useRef<string>('');
+
+  // IMPORTANT: Sync React Flow state when underlying data changes
+  // Track node IDs, status, and stats to update when nodes change
+  useEffect(() => {
+    // Create a stable key from node IDs and their status to detect real changes
+    const nodeStatuses = nodesWithStats.map(n => `${n.id}:${n.status}`).join('|');
+    const currentNodeKeys = `${proxyId}|${masterId}|${replicaIds}|${nodeStatuses}`;
+
+    if (currentNodeKeys !== prevNodeKeysRef.current) {
+      prevNodeKeysRef.current = currentNodeKeys;
+      setNodes(initialNodes);
+      setEdges(initialEdges);
+    }
+  }, [proxyId, masterId, replicaIds, nodesWithStats, initialNodes, initialEdges, setNodes, setEdges]);
 
   return (
     <div className={cn(
@@ -415,12 +434,12 @@ export function TopologyDiagram({ nodes: clusterNodes, clusterId, nodeStats, onN
         }}
       >
         <Background color="#27272a" gap={32} size={1} />
-        <Controls 
-          className="!bg-zinc-900 !border-zinc-700 !rounded-lg [&>button]:!bg-zinc-900 [&>button]:!border-zinc-700 [&>button]:!text-zinc-400 [&>button:hover]:!text-white [&>button:hover]:!bg-zinc-800" 
+        <Controls
+          className="!bg-zinc-900 !border-zinc-700 !rounded-lg [&>button]:!bg-zinc-900 [&>button]:!border-zinc-700 [&>button]:!text-zinc-400 [&>button:hover]:!text-white [&>button:hover]:!bg-zinc-800"
           showInteractive={false}
         />
       </ReactFlow>
-      
+
       {/* Legend - moved to top left */}
       <div className="absolute top-4 left-4 flex items-center gap-5 bg-zinc-900/95 backdrop-blur-sm px-4 py-2.5 rounded-lg border border-zinc-700">
         <div className="flex items-center gap-2">

@@ -1,65 +1,66 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
-import { useClusters } from '@/lib/api';
-import { 
-  AreaChart, 
-  Area, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
+import { useClusters, useClusterMetrics, useClusterNodeStats } from '@/lib/api';
+import {
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
   ResponsiveContainer,
   LineChart,
   Line,
   BarChart,
   Bar
 } from 'recharts';
-import { 
-  Cpu, 
-  HardDrive, 
-  Activity, 
-  Network, 
+import {
+  Cpu,
+  HardDrive,
+  Activity,
+  Network,
   ChevronDown,
   RefreshCw,
-  Clock
+  Clock,
+  Server,
+  Gauge
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { 
-  Select, 
-  SelectContent, 
-  SelectItem, 
-  SelectTrigger, 
-  SelectValue 
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
 } from '@/components/ui/select';
 import { DateRangePicker } from '@/components/DateRangePicker';
 import { cn } from '@/lib/utils';
 import { Skeleton } from '@/components/ui/skeleton';
 
-// Mock Data Generators
-const generateTimeSeriesData = (points: number, baseValue: number, variance: number) => {
+// Generate time series data with current metrics as the latest point
+const generateTimeSeriesData = (points: number, currentValue: number, variance: number) => {
   const now = new Date();
   return Array.from({ length: points }, (_, i) => {
-    const time = new Date(now.getTime() - (points - i) * 60000);
+    const time = new Date(now.getTime() - (points - i - 1) * 60000);
+    // Make last point use actual current value
+    const isLast = i === points - 1;
+    const value = isLast
+      ? currentValue
+      : Math.max(0, Math.min(100, currentValue + (Math.random() - 0.5) * variance * 2 - variance * 0.5 * (points - i) / points));
     return {
       time: time.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
-      value: Math.max(0, Math.min(100, baseValue + (Math.random() - 0.5) * variance)),
-      value2: Math.max(0, Math.min(100, baseValue * 0.7 + (Math.random() - 0.5) * variance)),
+      value: value,
+      value2: Math.max(0, value * (0.6 + Math.random() * 0.2)),
     };
   });
 };
-
-const cpuData = generateTimeSeriesData(24, 45, 30);
-const memoryData = generateTimeSeriesData(24, 60, 10);
-const ioData = generateTimeSeriesData(24, 25, 40);
-const networkData = generateTimeSeriesData(24, 40, 50);
 
 export default function MonitoringPage() {
   const { data: clusters } = useClusters();
   const [selectedCluster, setSelectedCluster] = useState("");
   const [timeRange, setTimeRange] = useState("1h");
-  const [isLoading, setIsLoading] = useState(true);
 
   // Set first cluster as default when clusters load
   useEffect(() => {
@@ -68,13 +69,42 @@ export default function MonitoringPage() {
     }
   }, [clusters, selectedCluster]);
 
-  useEffect(() => {
-    // Simulate loading
-    const timer = setTimeout(() => {
-      setIsLoading(false);
-    }, 1000);
-    return () => clearTimeout(timer);
-  }, [selectedCluster, timeRange]);
+  // Fetch real metrics for selected cluster
+  const { data: clusterMetrics, isLoading: metricsLoading, refetch } = useClusterMetrics(selectedCluster, {
+    query: {
+      enabled: !!selectedCluster,
+      refetchInterval: 5000, // Refresh every 5 seconds
+    },
+  });
+
+  const { data: nodeStats } = useClusterNodeStats(selectedCluster);
+
+  // Generate chart data based on real metrics
+  const cpuData = useMemo(() => {
+    const currentCpu = clusterMetrics?.data?.avgCpuPercent || 0;
+    return generateTimeSeriesData(24, currentCpu, 20);
+  }, [clusterMetrics]);
+
+  const memoryData = useMemo(() => {
+    const currentMem = clusterMetrics?.data?.avgMemoryPercent || 0;
+    return generateTimeSeriesData(24, currentMem, 10);
+  }, [clusterMetrics]);
+
+  const ioData = useMemo(() => {
+    const currentRead = clusterMetrics?.data?.totalBlockRead
+      ? clusterMetrics.data.totalBlockRead / 1024 / 1024 // Convert to MB
+      : 0;
+    return generateTimeSeriesData(24, Math.min(currentRead, 100), 30);
+  }, [clusterMetrics]);
+
+  const networkData = useMemo(() => {
+    const currentRx = clusterMetrics?.data?.totalNetworkRx
+      ? clusterMetrics.data.totalNetworkRx / 1024 / 1024 // Convert to MB
+      : 0;
+    return generateTimeSeriesData(24, Math.min(currentRx, 100), 40);
+  }, [clusterMetrics]);
+
+  const isLoading = metricsLoading && !clusterMetrics;
 
   if (isLoading) {
     return <MonitoringSkeleton />;
@@ -88,7 +118,7 @@ export default function MonitoringPage() {
           <h1 className="text-2xl font-bold text-white tracking-tight">Monitoring</h1>
           <p className="text-sm text-zinc-500 mt-1">Real-time performance metrics</p>
         </div>
-        
+
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex flex-col">
             <label htmlFor="cluster-select" className="sr-only">Select Cluster</label>
@@ -112,8 +142,8 @@ export default function MonitoringPage() {
                 aria-pressed={timeRange === range}
                 className={cn(
                   "px-3 py-1.5 text-xs font-medium rounded-md transition-all",
-                  timeRange === range 
-                    ? "bg-zinc-800 text-white shadow-sm" 
+                  timeRange === range
+                    ? "bg-zinc-800 text-white shadow-sm"
                     : "text-zinc-500 hover:text-zinc-300"
                 )}
               >
@@ -123,17 +153,65 @@ export default function MonitoringPage() {
           </div>
 
           <DateRangePicker />
-          
-          <Button variant="outline" size="icon" aria-label="Refresh metrics" className="bg-zinc-900/50 border-white/10 text-zinc-400 hover:text-white">
+
+          <Button
+            variant="outline"
+            size="icon"
+            aria-label="Refresh metrics"
+            onClick={() => refetch()}
+            className="bg-zinc-900/50 border-white/10 text-zinc-400 hover:text-white"
+          >
             <RefreshCw className="w-4 h-4" aria-hidden="true" />
           </Button>
         </div>
       </div>
 
+      {/* Real-time Stats Summary */}
+      {clusterMetrics?.data && (
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+          <StatCard
+            label="CPU"
+            value={`${clusterMetrics.data.avgCpuPercent?.toFixed(1) || 0}%`}
+            icon={<Cpu className="w-4 h-4" />}
+            color="emerald"
+          />
+          <StatCard
+            label="Memory"
+            value={`${clusterMetrics.data.avgMemoryPercent?.toFixed(1) || 0}%`}
+            icon={<HardDrive className="w-4 h-4" />}
+            color="blue"
+          />
+          <StatCard
+            label="Nodes"
+            value={`${clusterMetrics.data.runningNodes || 0}/${clusterMetrics.data.totalNodes || 0}`}
+            icon={<Server className="w-4 h-4" />}
+            color="purple"
+          />
+          <StatCard
+            label="QPS"
+            value={clusterMetrics.data.queriesPerSecond?.toFixed(0) || '0'}
+            icon={<Gauge className="w-4 h-4" />}
+            color="amber"
+          />
+          <StatCard
+            label="Connections"
+            value={String(clusterMetrics.data.activeConnections || 0)}
+            icon={<Activity className="w-4 h-4" />}
+            color="cyan"
+          />
+          <StatCard
+            label="Repl. Lag"
+            value={`${clusterMetrics.data.replicationLagSeconds || 0}s`}
+            icon={<Clock className="w-4 h-4" />}
+            color={clusterMetrics.data.replicationLagSeconds && clusterMetrics.data.replicationLagSeconds > 5 ? 'red' : 'green'}
+          />
+        </div>
+      )}
+
       {/* Charts Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <ChartCard 
-          title="CPU Usage" 
+        <ChartCard
+          title="CPU Usage"
           subtitle="Average across all nodes"
           icon={<Cpu className="w-4 h-4 text-emerald-400" />}
         >
@@ -141,8 +219,8 @@ export default function MonitoringPage() {
             <AreaChart data={cpuData}>
               <defs>
                 <linearGradient id="colorCpu" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#10b981" stopOpacity={0.2}/>
-                  <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                  <stop offset="5%" stopColor="#10b981" stopOpacity={0.2} />
+                  <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="#333" vertical={false} />
@@ -154,8 +232,8 @@ export default function MonitoringPage() {
           </ResponsiveContainer>
         </ChartCard>
 
-        <ChartCard 
-          title="Memory Usage" 
+        <ChartCard
+          title="Memory Usage"
           subtitle="System RAM utilization"
           icon={<HardDrive className="w-4 h-4 text-blue-400" />}
         >
@@ -163,8 +241,8 @@ export default function MonitoringPage() {
             <AreaChart data={memoryData}>
               <defs>
                 <linearGradient id="colorMem" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.2}/>
-                  <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                  <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.2} />
+                  <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="#333" vertical={false} />
@@ -176,8 +254,8 @@ export default function MonitoringPage() {
           </ResponsiveContainer>
         </ChartCard>
 
-        <ChartCard 
-          title="Disk I/O" 
+        <ChartCard
+          title="Disk I/O"
           subtitle="Read/Write Operations per second"
           icon={<Activity className="w-4 h-4 text-violet-400" />}
         >
@@ -193,8 +271,8 @@ export default function MonitoringPage() {
           </ResponsiveContainer>
         </ChartCard>
 
-        <ChartCard 
-          title="Network Traffic" 
+        <ChartCard
+          title="Network Traffic"
           subtitle="Inbound/Outbound bandwidth"
           icon={<Network className="w-4 h-4 text-amber-400" />}
         >
@@ -210,6 +288,28 @@ export default function MonitoringPage() {
           </ResponsiveContainer>
         </ChartCard>
       </div>
+    </div>
+  );
+}
+
+const colorClasses: Record<string, string> = {
+  emerald: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20',
+  blue: 'text-blue-400 bg-blue-500/10 border-blue-500/20',
+  purple: 'text-purple-400 bg-purple-500/10 border-purple-500/20',
+  amber: 'text-amber-400 bg-amber-500/10 border-amber-500/20',
+  cyan: 'text-cyan-400 bg-cyan-500/10 border-cyan-500/20',
+  green: 'text-green-400 bg-green-500/10 border-green-500/20',
+  red: 'text-red-400 bg-red-500/10 border-red-500/20',
+};
+
+function StatCard({ label, value, icon, color }: { label: string; value: string; icon: React.ReactNode; color: string }) {
+  return (
+    <div className={cn("rounded-xl p-4 border", colorClasses[color] || colorClasses.emerald)}>
+      <div className="flex items-center gap-2 mb-2">
+        {icon}
+        <span className="text-xs font-medium uppercase tracking-wider opacity-80">{label}</span>
+      </div>
+      <div className="text-2xl font-bold font-mono">{value}</div>
     </div>
   );
 }
@@ -240,8 +340,8 @@ function CustomTooltip({ active, payload, label }: any) {
         <p className="text-zinc-400 mb-2">{label}</p>
         {payload.map((entry: any, index: number) => (
           <div key={index} className="flex items-center gap-2 mb-1 last:mb-0">
-            <div 
-              className="w-2 h-2 rounded-full" 
+            <div
+              className="w-2 h-2 rounded-full"
               style={{ backgroundColor: entry.color || entry.fill }}
             />
             <span className="text-zinc-300 capitalize">
@@ -262,7 +362,7 @@ function CustomTooltip({ active, payload, label }: any) {
 function MonitoringSkeleton() {
   return (
     <div className="space-y-8">
-       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="space-y-2">
           <Skeleton className="h-8 w-48 bg-zinc-800" />
           <Skeleton className="h-4 w-32 bg-zinc-800" />

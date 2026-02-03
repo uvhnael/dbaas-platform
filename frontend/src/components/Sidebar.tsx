@@ -5,14 +5,15 @@ import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { useAuth } from '@/lib/auth-context';
-import { 
-  LayoutDashboard, 
-  Database, 
-  BarChart3, 
-  CloudUpload, 
+import {
+  LayoutDashboard,
+  Database,
+  BarChart3,
+  CloudUpload,
   Settings,
   ChevronRight,
-  LogOut
+  LogOut,
+  ListTodo
 } from 'lucide-react';
 
 const navigation = [
@@ -20,6 +21,7 @@ const navigation = [
   { name: 'Clusters', href: '/clusters', icon: Database },
   { name: 'Monitoring', href: '/monitoring', icon: BarChart3 },
   { name: 'Backups', href: '/backups', icon: CloudUpload },
+  { name: 'Tasks', href: '/tasks', icon: ListTodo },
   { name: 'Settings', href: '/settings', icon: Settings },
 ];
 
@@ -47,9 +49,9 @@ export function Sidebar() {
       {/* Navigation */}
       <nav className="flex-1 px-3 py-6 space-y-1">
         {navigation.map((item) => {
-          const isActive = pathname === item.href || 
+          const isActive = pathname === item.href ||
             (item.href !== '/' && pathname.startsWith(item.href));
-          
+
           return (
             <Link
               key={item.name}
