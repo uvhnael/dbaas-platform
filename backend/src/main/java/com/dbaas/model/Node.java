@@ -51,6 +51,10 @@ public class Node {
     @Builder.Default
     private String memory = "4G";
 
+    @Column(name = "storage")
+    @Builder.Default
+    private String storage = "10G";
+
     @Column(name = "is_read_only")
     @Builder.Default
     private boolean readOnly = false;

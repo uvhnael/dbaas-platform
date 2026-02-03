@@ -2,6 +2,8 @@ package com.dbaas.model;
 
 import jakarta.persistence.*;
 import lombok.*;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -45,15 +47,31 @@ public class Cluster {
     @Column(name = "proxysql_container_id")
     private String proxySqlContainerId;
 
-    @ElementCollection(fetch = FetchType.EAGER)
-    @CollectionTable(name = "cluster_replicas", joinColumns = @JoinColumn(name = "cluster_id"))
-    @Column(name = "container_id")
+    /**
+     * Thay thế @ElementCollection bằng @JdbcTypeCode(SqlTypes.JSON)
+     * Dữ liệu sẽ được lưu vào 1 cột 'replica_container_ids' duy nhất.
+     */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "replica_container_ids", columnDefinition = "json")
     @Builder.Default
     private List<String> replicaContainerIds = new ArrayList<>();
 
     private String errorMessage;
 
-    // Description
+    // Connection configuration
+    @Column(name = "db_user")
+    @Builder.Default
+    private String dbUser = "app_user";
+
+    @Column(name = "db_password")
+    private String dbPassword; // Encrypted password
+
+    @Column(name = "root_password")
+    private String rootPassword; // Encrypted root password for admin
+
+    @Column(name = "proxy_port")
+    private Integer proxyPort; // Published port of ProxySQL (auto-assigned or configured)
+
     @Column(columnDefinition = "TEXT")
     private String description;
 
@@ -65,7 +83,14 @@ public class Cluster {
     @Builder.Default
     private boolean enableBackup = false;
 
-    @Column(nullable = false)
+    /**
+     * Version field for optimistic locking.
+     * Prevents lost updates when concurrent modifications occur.
+     */
+    @Version
+    private Long version;
+
+    @Column(nullable = false, updatable = false)
     private Instant createdAt;
 
     private Instant updatedAt;

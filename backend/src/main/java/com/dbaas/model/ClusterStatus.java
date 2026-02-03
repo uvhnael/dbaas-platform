@@ -10,5 +10,6 @@ public enum ClusterStatus {
     DEGRADED,
     STOPPED,
     DELETING,
+    SCALING,
     FAILED
 }
