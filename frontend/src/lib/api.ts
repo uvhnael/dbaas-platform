@@ -20,8 +20,8 @@ export * from './api/model';
 // These map the old hook names to new generated ones
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { 
-  useListClusters, 
+import {
+  useListClusters,
   useGetCluster as useGetClusterGenerated,
   useCreateCluster as useCreateClusterGenerated,
   useDeleteCluster as useDeleteClusterGenerated,
@@ -31,13 +31,13 @@ import {
   useGetClusterMetrics,
   useGetClusterHealth,
 } from './api/generated/clusters/clusters';
-import { 
+import {
   useLogin as useLoginGenerated,
   useRegister as useRegisterGenerated,
   useGetCurrentUser,
 } from './api/generated/authentication/authentication';
-import { 
-  useGetNode, 
+import {
+  useGetNode,
   useGetNodeLogs,
   useGetClusterLogs,
   useListNodes,
@@ -69,21 +69,29 @@ import { customInstance } from './api/custom-instance';
  * Fetch all clusters for the current user
  * Smart polling: 5s when clusters are in active states, 30s otherwise
  */
+import { POLLING_INTERVALS } from './constants';
+
+// ... imports remain the same
+
+/**
+ * Fetch all clusters for the current user
+ * Smart polling: 5s when clusters are in active states, 30s otherwise
+ */
 export function useClusters() {
-  const query = useListClusters({
+  const query = useListClusters(undefined, {
     query: {
-      refetchInterval: (query) => {
+      refetchInterval: (query: any) => {
         const clusters = query.state.data?.data || [];
         // Fast polling if any cluster is in an active/transitional state
-        const hasActiveCluster = clusters.some(c => 
+        const hasActiveCluster = clusters.some((c: any) =>
           c.status && ['PROVISIONING', 'DELETING', 'DEGRADED'].includes(c.status)
         );
-        return hasActiveCluster ? 5000 : 30000; // 5s or 30s
+        return hasActiveCluster ? POLLING_INTERVALS.FAST : POLLING_INTERVALS.SLOW;
       },
       refetchOnWindowFocus: true,
     },
   });
-  
+
   // Transform response to extract data
   return {
     ...query,
@@ -92,21 +100,22 @@ export function useClusters() {
 }
 
 /**
- * Fetch a single cluster by ID
+ * Fetch a single cluster by ID with smart polling
  */
 export function useCluster(id: string) {
   const query = useGetClusterGenerated(id, {
     query: {
       enabled: !!id,
-      refetchInterval: (query) => {
+      refetchInterval: (query: any) => {
         const status = query.state.data?.data?.status;
         // Fast polling for active states
         if (status && ['PROVISIONING', 'DELETING', 'DEGRADED'].includes(status)) {
-          return 5000;
+          return POLLING_INTERVALS.FAST;
         }
         // Slow polling for stable states
-        return 15000;
+        return POLLING_INTERVALS.SLOW;
       },
+      refetchOnWindowFocus: true,
     },
   });
 
@@ -117,12 +126,19 @@ export function useCluster(id: string) {
 }
 
 /**
- * Fetch cluster nodes
+ * Fetch cluster nodes with smart polling
+ * Fast polling when cluster is in active states for real-time updates
  */
-export function useClusterNodes(clusterId: string) {
+export function useClusterNodes(clusterId: string, options?: { enabled?: boolean }) {
   const query = useListNodes(clusterId, {
     query: {
-      enabled: !!clusterId,
+      enabled: !!clusterId && (options?.enabled ?? true),
+      refetchInterval: (query) => {
+        // Could be dynamic based on cluster status, using SLOW for now as per previous logic (30s)
+        // But previously it was 30*1000 which is SLOW
+        return POLLING_INTERVALS.SLOW; 
+      },
+      refetchOnWindowFocus: true,
     },
   });
 
@@ -133,13 +149,14 @@ export function useClusterNodes(clusterId: string) {
 }
 
 /**
- * Fetch cluster metrics
+ * Fetch cluster metrics with moderate polling
  */
-export function useClusterMetricsHook(clusterId: string) {
+export function useClusterMetricsHook(clusterId: string, options?: { enabled?: boolean }) {
   const query = useGetClusterMetrics(clusterId, {
     query: {
-      enabled: !!clusterId,
-      refetchInterval: 5000,
+      enabled: !!clusterId && (options?.enabled ?? true),
+      refetchInterval: POLLING_INTERVALS.STANDARD, // 10s was used relevant to STANDARD
+      refetchOnWindowFocus: true,
     },
   });
 
@@ -154,8 +171,48 @@ export function useClusterMetricsHook(clusterId: string) {
  */
 export const useClusterMetrics = useClusterMetricsHook;
 
+// Import generated connection DTO
+import type { ClusterConnectionDTO } from './api/model/clusterConnectionDTO';
+
 /**
- * Create a new cluster
+ * Fetch cluster connection information (host, port, credentials)
+ */
+export function useClusterConnection(clusterId: string) {
+  return useQuery({
+    queryKey: ['cluster-connection', clusterId],
+    queryFn: async (): Promise<ClusterConnectionDTO> => {
+      const response = await customInstance<{ data: ClusterConnectionDTO }>({
+        url: `/api/v1/clusters/${clusterId}/connection`,
+        method: 'GET',
+      });
+      return response.data;
+    },
+    enabled: !!clusterId,
+    staleTime: 1000 * 60 * 5, // 5 minutes - connection info rarely changes
+  });
+}
+
+// Import generated types for per-node configuration
+import type { NodeConfig as GeneratedNodeConfig } from './api/model/nodeConfig';
+
+// Create cluster request with per-node configuration support
+interface CreateClusterData {
+  name: string;
+  mysqlVersion?: string;
+  replicaCount?: number;
+  description?: string;
+  // Legacy: uniform resources for all nodes
+  resources?: {
+    cpuCores?: number;
+    memory?: string;
+  };
+  // New: per-node configuration
+  masterConfig?: GeneratedNodeConfig;
+  replicaConfigs?: GeneratedNodeConfig[];
+}
+
+/**
+ * Create a new cluster with optional per-node resource configuration
  */
 export function useCreateClusterMutation() {
   const queryClient = useQueryClient();
@@ -163,18 +220,40 @@ export function useCreateClusterMutation() {
 
   return {
     ...mutation,
-    mutate: (data: { name: string; mysqlVersion?: string; replicaCount?: number }) => {
+    mutate: (data: CreateClusterData, options?: { onSuccess?: () => void; onError?: (error: any) => void }) => {
       toast.loading('Creating cluster...', { id: 'create-cluster' });
-      
+
+      // Build request payload
+      const requestData: any = {
+        name: data.name,
+        mysqlVersion: data.mysqlVersion,
+        replicaCount: data.replicaCount,
+        description: data.description,
+      };
+
+      // Add per-node configs if provided
+      if (data.masterConfig) {
+        requestData.masterConfig = data.masterConfig;
+      }
+      if (data.replicaConfigs && data.replicaConfigs.length > 0) {
+        requestData.replicaConfigs = data.replicaConfigs;
+      }
+      // Fallback to legacy resources if no per-node config
+      if (data.resources && !data.masterConfig) {
+        requestData.resources = data.resources;
+      }
+
       mutation.mutate(
-        { data: { name: data.name, mysqlVersion: data.mysqlVersion, replicaCount: data.replicaCount } },
+        { data: requestData },
         {
           onSuccess: () => {
             toast.success('Cluster created successfully!', { id: 'create-cluster' });
             queryClient.invalidateQueries({ queryKey: ['/api/v1/clusters'] });
+            options?.onSuccess?.();
           },
-          onError: (error) => {
+          onError: (error: any) => {
             toast.error(`Failed to create cluster: ${error.message}`, { id: 'create-cluster' });
+            options?.onError?.(error);
           },
         }
       );
@@ -184,6 +263,7 @@ export function useCreateClusterMutation() {
 
 /**
  * Delete a cluster
+ * Returns immediately with DELETING status, actual deletion happens async
  */
 export function useDeleteClusterMutation() {
   const queryClient = useQueryClient();
@@ -191,18 +271,20 @@ export function useDeleteClusterMutation() {
 
   return {
     ...mutation,
-    mutate: (id: string) => {
+    mutate: (id: string, options?: { onSuccess?: () => void; onError?: (error: any) => void }) => {
       toast.loading('Deleting cluster...', { id: `delete-${id}` });
-      
+
       mutation.mutate(
         { id },
         {
-          onSuccess: () => {
-            toast.success('Cluster deleted!', { id: `delete-${id}` });
+          onSuccess: (response) => {
+            toast.success('Cluster deletion started', { id: `delete-${id}` });
             queryClient.invalidateQueries({ queryKey: ['/api/v1/clusters'] });
+            options?.onSuccess?.();
           },
-          onError: (error) => {
+          onError: (error: any) => {
             toast.error(`Failed to delete: ${error.message}`, { id: `delete-${id}` });
+            options?.onError?.(error);
           },
         }
       );
@@ -224,17 +306,18 @@ export function useStartClusterMutation() {
 
   return {
     ...mutation,
-    mutate: (id: string) => {
+    mutate: (id: string, options?: { onSuccess?: () => void }) => {
       toast.loading('Starting cluster...', { id: `start-${id}` });
-      
+
       mutation.mutate(
         { id },
         {
           onSuccess: () => {
             toast.success('Cluster started!', { id: `start-${id}` });
             queryClient.invalidateQueries({ queryKey: ['/api/v1/clusters'] });
+            options?.onSuccess?.();
           },
-          onError: (error) => {
+          onError: (error: any) => {
             toast.error(`Failed to start: ${error.message}`, { id: `start-${id}` });
           },
         }
@@ -252,17 +335,18 @@ export function useStopClusterMutation() {
 
   return {
     ...mutation,
-    mutate: (id: string) => {
+    mutate: (id: string, options?: { onSuccess?: () => void }) => {
       toast.loading('Stopping cluster...', { id: `stop-${id}` });
-      
+
       mutation.mutate(
         { id },
         {
           onSuccess: () => {
             toast.success('Cluster stopped!', { id: `stop-${id}` });
             queryClient.invalidateQueries({ queryKey: ['/api/v1/clusters'] });
+            options?.onSuccess?.();
           },
-          onError: (error) => {
+          onError: (error: any) => {
             toast.error(`Failed to stop: ${error.message}`, { id: `stop-${id}` });
           },
         }
@@ -283,17 +367,17 @@ export function useRestartCluster() {
     isPending: stopMutation.isPending || startMutation.isPending,
     mutateAsync: async (id: string) => {
       toast.loading('Restarting cluster...', { id: `restart-${id}` });
-      
+
       try {
         // Stop the cluster
         await stopMutation.mutateAsync({ id });
-        
+
         // Wait a moment before starting
         await new Promise(resolve => setTimeout(resolve, 2000));
-        
+
         // Start the cluster
         await startMutation.mutateAsync({ id });
-        
+
         toast.success('Cluster restarted!', { id: `restart-${id}` });
         queryClient.invalidateQueries({ queryKey: ['/api/v1/clusters'] });
       } catch (error: any) {
@@ -327,7 +411,7 @@ export function useLoginMutation() {
             }
             options?.onSuccess?.(response);
           },
-          onError: (error) => {
+          onError: (error: any) => {
             toast.error(`Login failed: ${error.message}`);
           },
         }
@@ -355,7 +439,7 @@ export function useRegisterMutation() {
             }
             options?.onSuccess?.(response);
           },
-          onError: (error) => {
+          onError: (error: any) => {
             toast.error(`Registration failed: ${error.message}`);
           },
         }
@@ -401,7 +485,7 @@ export function useClusterTasks(clusterId: string) {
   const query = useListClusterTasks(clusterId, {
     query: {
       enabled: !!clusterId,
-      refetchInterval: 10000,
+      refetchInterval: POLLING_INTERVALS.STANDARD,
     },
   });
 
@@ -454,7 +538,7 @@ export function useCreateBackupMutation(clusterId: string) {
     ...mutation,
     mutate: (name?: string) => {
       toast.loading('Creating backup...', { id: 'create-backup' });
-      
+
       mutation.mutate(
         { clusterId, data: { name } },
         {
@@ -462,7 +546,7 @@ export function useCreateBackupMutation(clusterId: string) {
             toast.success('Backup created!', { id: 'create-backup' });
             queryClient.invalidateQueries({ queryKey: [`/api/v1/clusters/${clusterId}/backups`] });
           },
-          onError: (error) => {
+          onError: (error: any) => {
             toast.error(`Backup failed: ${error.message}`, { id: 'create-backup' });
           },
         }
@@ -481,7 +565,7 @@ export function useCreateBackupMutation(clusterId: string) {
 export function useDashboardSummary() {
   const query = useGetDashboardSummary({
     query: {
-      refetchInterval: 30000, // Refresh every 30 seconds
+      refetchInterval: POLLING_INTERVALS.SLOW, // Refresh every 30 seconds
       refetchOnWindowFocus: true,
     },
   });
@@ -497,13 +581,14 @@ export function useDashboardSummary() {
 // ============================================
 
 /**
- * Fetch stats for a single node
+ * Fetch stats for a single node with moderate polling
  */
 export function useNodeStats(nodeId: string) {
   const query = useGetNodeStats(nodeId, {
     query: {
       enabled: !!nodeId,
-      refetchInterval: 5000, // Refresh every 5 seconds
+      refetchInterval: POLLING_INTERVALS.MODERATE, // 8s - consistent with cluster node stats
+      refetchOnWindowFocus: true,
     },
   });
 
@@ -514,13 +599,14 @@ export function useNodeStats(nodeId: string) {
 }
 
 /**
- * Fetch stats for all nodes in a cluster
+ * Fetch stats for all nodes in a cluster with balanced polling
  */
 export function useClusterNodeStats(clusterId: string) {
   const query = useGetAllNodesStats(clusterId, {
     query: {
       enabled: !!clusterId,
-      refetchInterval: 5000, // Refresh every 5 seconds
+      refetchInterval: POLLING_INTERVALS.MODERATE, // 8s - balance between freshness and performance
+      refetchOnWindowFocus: true,
     },
   });
 
