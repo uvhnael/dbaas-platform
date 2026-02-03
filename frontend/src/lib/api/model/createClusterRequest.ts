@@ -5,6 +5,7 @@
  * OpenAPI spec version: v0
  */
 import type { ResourceConfig } from "./resourceConfig";
+import type { NodeConfig } from "./nodeConfig";
 import type { FeatureConfig } from "./featureConfig";
 
 export interface CreateClusterRequest {
@@ -27,5 +28,8 @@ export interface CreateClusterRequest {
    */
   description?: string;
   resources?: ResourceConfig;
+  masterConfig?: NodeConfig;
+  replicaConfigs?: NodeConfig[];
   features?: FeatureConfig;
+  masterNodeConfig?: NodeConfig;
 }

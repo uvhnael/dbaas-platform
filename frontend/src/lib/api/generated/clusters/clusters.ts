@@ -21,47 +21,55 @@ import type {
 } from "@tanstack/react-query";
 
 import type {
-  ApiResponseCluster,
+  ApiResponseClusterConnectionDTO,
   ApiResponseClusterHealthResponse,
   ApiResponseClusterMetricsResponse,
-  ApiResponseListCluster,
-  ApiResponseVoid,
+  ApiResponseClusterResponse,
+  ApiResponseObject,
   CreateClusterRequest,
+  ListClustersParams,
   ScaleRequest,
 } from "../../model";
 
 import { customInstance } from "../../custom-instance";
 
 /**
- * @summary List all clusters
+ * @summary List all clusters with optional pagination
  */
-export const listClusters = (signal?: AbortSignal) => {
-  return customInstance<ApiResponseListCluster>({
+export const listClusters = (
+  params?: ListClustersParams,
+  signal?: AbortSignal,
+) => {
+  return customInstance<ApiResponseObject>({
     url: `/api/v1/clusters`,
     method: "GET",
+    params,
     signal,
   });
 };
 
-export const getListClustersQueryKey = () => {
-  return [`/api/v1/clusters`] as const;
+export const getListClustersQueryKey = (params?: ListClustersParams) => {
+  return [`/api/v1/clusters`, ...(params ? [params] : [])] as const;
 };
 
 export const getListClustersQueryOptions = <
   TData = Awaited<ReturnType<typeof listClusters>>,
   TError = unknown,
->(options?: {
-  query?: Partial<
-    UseQueryOptions<Awaited<ReturnType<typeof listClusters>>, TError, TData>
-  >;
-}) => {
+>(
+  params?: ListClustersParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listClusters>>, TError, TData>
+    >;
+  },
+) => {
   const { query: queryOptions } = options ?? {};
 
-  const queryKey = queryOptions?.queryKey ?? getListClustersQueryKey();
+  const queryKey = queryOptions?.queryKey ?? getListClustersQueryKey(params);
 
   const queryFn: QueryFunction<Awaited<ReturnType<typeof listClusters>>> = ({
     signal,
-  }) => listClusters(signal);
+  }) => listClusters(params, signal);
 
   return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
     Awaited<ReturnType<typeof listClusters>>,
@@ -79,6 +87,7 @@ export function useListClusters<
   TData = Awaited<ReturnType<typeof listClusters>>,
   TError = unknown,
 >(
+  params: undefined | ListClustersParams,
   options: {
     query: Partial<
       UseQueryOptions<Awaited<ReturnType<typeof listClusters>>, TError, TData>
@@ -100,6 +109,7 @@ export function useListClusters<
   TData = Awaited<ReturnType<typeof listClusters>>,
   TError = unknown,
 >(
+  params?: ListClustersParams,
   options?: {
     query?: Partial<
       UseQueryOptions<Awaited<ReturnType<typeof listClusters>>, TError, TData>
@@ -121,6 +131,7 @@ export function useListClusters<
   TData = Awaited<ReturnType<typeof listClusters>>,
   TError = unknown,
 >(
+  params?: ListClustersParams,
   options?: {
     query?: Partial<
       UseQueryOptions<Awaited<ReturnType<typeof listClusters>>, TError, TData>
@@ -131,13 +142,14 @@ export function useListClusters<
   queryKey: DataTag<QueryKey, TData, TError>;
 };
 /**
- * @summary List all clusters
+ * @summary List all clusters with optional pagination
  */
 
 export function useListClusters<
   TData = Awaited<ReturnType<typeof listClusters>>,
   TError = unknown,
 >(
+  params?: ListClustersParams,
   options?: {
     query?: Partial<
       UseQueryOptions<Awaited<ReturnType<typeof listClusters>>, TError, TData>
@@ -147,7 +159,7 @@ export function useListClusters<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 } {
-  const queryOptions = getListClustersQueryOptions(options);
+  const queryOptions = getListClustersQueryOptions(params, options);
 
   const query = useQuery(queryOptions, queryClient) as UseQueryResult<
     TData,
@@ -166,7 +178,7 @@ export const createCluster = (
   createClusterRequest: CreateClusterRequest,
   signal?: AbortSignal,
 ) => {
-  return customInstance<ApiResponseCluster>({
+  return customInstance<ApiResponseClusterResponse>({
     url: `/api/v1/clusters`,
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -245,7 +257,7 @@ export const useCreateCluster = <TError = unknown, TContext = unknown>(
  * @summary Stop a running cluster
  */
 export const stopCluster = (id: string, signal?: AbortSignal) => {
-  return customInstance<ApiResponseCluster>({
+  return customInstance<ApiResponseClusterResponse>({
     url: `/api/v1/clusters/${id}/stop`,
     method: "POST",
     signal,
@@ -322,7 +334,7 @@ export const useStopCluster = <TError = unknown, TContext = unknown>(
  * @summary Start a stopped cluster
  */
 export const startCluster = (id: string, signal?: AbortSignal) => {
-  return customInstance<ApiResponseCluster>({
+  return customInstance<ApiResponseClusterResponse>({
     url: `/api/v1/clusters/${id}/start`,
     method: "POST",
     signal,
@@ -403,7 +415,7 @@ export const scaleCluster = (
   scaleRequest: ScaleRequest,
   signal?: AbortSignal,
 ) => {
-  return customInstance<ApiResponseCluster>({
+  return customInstance<ApiResponseClusterResponse>({
     url: `/api/v1/clusters/${id}/scale`,
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -482,7 +494,7 @@ export const useScaleCluster = <TError = unknown, TContext = unknown>(
  * @summary Get cluster details
  */
 export const getCluster = (id: string, signal?: AbortSignal) => {
-  return customInstance<ApiResponseCluster>({
+  return customInstance<ApiResponseClusterResponse>({
     url: `/api/v1/clusters/${id}`,
     method: "GET",
     signal,
@@ -621,7 +633,7 @@ export function useGetCluster<
  * @summary Delete a cluster
  */
 export const deleteCluster = (id: string) => {
-  return customInstance<ApiResponseVoid>({
+  return customInstance<ApiResponseClusterResponse>({
     url: `/api/v1/clusters/${id}`,
     method: "DELETE",
   });
@@ -1000,6 +1012,166 @@ export function useGetClusterHealth<
   queryKey: DataTag<QueryKey, TData, TError>;
 } {
   const queryOptions = getGetClusterHealthQueryOptions(id, options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  query.queryKey = queryOptions.queryKey;
+
+  return query;
+}
+
+/**
+ * @summary Get cluster connection information (host, ports, credentials)
+ */
+export const getClusterConnection = (id: string, signal?: AbortSignal) => {
+  return customInstance<ApiResponseClusterConnectionDTO>({
+    url: `/api/v1/clusters/${id}/connection`,
+    method: "GET",
+    signal,
+  });
+};
+
+export const getGetClusterConnectionQueryKey = (id?: string) => {
+  return [`/api/v1/clusters/${id}/connection`] as const;
+};
+
+export const getGetClusterConnectionQueryOptions = <
+  TData = Awaited<ReturnType<typeof getClusterConnection>>,
+  TError = unknown,
+>(
+  id: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getClusterConnection>>,
+        TError,
+        TData
+      >
+    >;
+  },
+) => {
+  const { query: queryOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetClusterConnectionQueryKey(id);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getClusterConnection>>
+  > = ({ signal }) => getClusterConnection(id, signal);
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getClusterConnection>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type GetClusterConnectionQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getClusterConnection>>
+>;
+export type GetClusterConnectionQueryError = unknown;
+
+export function useGetClusterConnection<
+  TData = Awaited<ReturnType<typeof getClusterConnection>>,
+  TError = unknown,
+>(
+  id: string,
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getClusterConnection>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getClusterConnection>>,
+          TError,
+          Awaited<ReturnType<typeof getClusterConnection>>
+        >,
+        "initialData"
+      >;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetClusterConnection<
+  TData = Awaited<ReturnType<typeof getClusterConnection>>,
+  TError = unknown,
+>(
+  id: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getClusterConnection>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getClusterConnection>>,
+          TError,
+          Awaited<ReturnType<typeof getClusterConnection>>
+        >,
+        "initialData"
+      >;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+export function useGetClusterConnection<
+  TData = Awaited<ReturnType<typeof getClusterConnection>>,
+  TError = unknown,
+>(
+  id: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getClusterConnection>>,
+        TError,
+        TData
+      >
+    >;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * @summary Get cluster connection information (host, ports, credentials)
+ */
+
+export function useGetClusterConnection<
+  TData = Awaited<ReturnType<typeof getClusterConnection>>,
+  TError = unknown,
+>(
+  id: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getClusterConnection>>,
+        TError,
+        TData
+      >
+    >;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getGetClusterConnectionQueryOptions(id, options);
 
   const query = useQuery(queryOptions, queryClient) as UseQueryResult<
     TData,

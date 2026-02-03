@@ -15,5 +15,6 @@ export const ClusterStatus = {
   DEGRADED: "DEGRADED",
   STOPPED: "STOPPED",
   DELETING: "DELETING",
+  SCALING: "SCALING",
   FAILED: "FAILED",
 } as const;

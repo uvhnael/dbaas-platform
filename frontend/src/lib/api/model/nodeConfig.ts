@@ -5,7 +5,7 @@
  * OpenAPI spec version: v0
  */
 
-export interface ResourceConfig {
+export interface NodeConfig {
   /**
    * @minimum 1
    * @maximum 16

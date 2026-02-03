@@ -23,12 +23,93 @@ import type {
 import type {
   ApiResponseAuthResponse,
   ApiResponseUserDto,
+  ApiResponseVoid,
+  ChangePasswordRequest,
   LoginRequest,
   RegisterRequest,
+  UpdateProfileRequest,
 } from "../../model";
 
 import { customInstance } from "../../custom-instance";
 
+/**
+ * @summary Update current user profile
+ */
+export const updateProfile = (updateProfileRequest: UpdateProfileRequest) => {
+  return customInstance<ApiResponseUserDto>({
+    url: `/api/v1/auth/profile`,
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    data: updateProfileRequest,
+  });
+};
+
+export const getUpdateProfileMutationOptions = <
+  TError = unknown,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateProfile>>,
+    TError,
+    { data: UpdateProfileRequest },
+    TContext
+  >;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateProfile>>,
+  TError,
+  { data: UpdateProfileRequest },
+  TContext
+> => {
+  const mutationKey = ["updateProfile"];
+  const { mutation: mutationOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey } };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateProfile>>,
+    { data: UpdateProfileRequest }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return updateProfile(data);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateProfileMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateProfile>>
+>;
+export type UpdateProfileMutationBody = UpdateProfileRequest;
+export type UpdateProfileMutationError = unknown;
+
+/**
+ * @summary Update current user profile
+ */
+export const useUpdateProfile = <TError = unknown, TContext = unknown>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof updateProfile>>,
+      TError,
+      { data: UpdateProfileRequest },
+      TContext
+    >;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof updateProfile>>,
+  TError,
+  { data: UpdateProfileRequest },
+  TContext
+> => {
+  const mutationOptions = getUpdateProfileMutationOptions(options);
+
+  return useMutation(mutationOptions, queryClient);
+};
 /**
  * @summary Register a new user
  */
@@ -187,6 +268,88 @@ export const useLogin = <TError = unknown, TContext = unknown>(
   TContext
 > => {
   const mutationOptions = getLoginMutationOptions(options);
+
+  return useMutation(mutationOptions, queryClient);
+};
+/**
+ * @summary Change current user password
+ */
+export const changePassword = (
+  changePasswordRequest: ChangePasswordRequest,
+  signal?: AbortSignal,
+) => {
+  return customInstance<ApiResponseVoid>({
+    url: `/api/v1/auth/change-password`,
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    data: changePasswordRequest,
+    signal,
+  });
+};
+
+export const getChangePasswordMutationOptions = <
+  TError = unknown,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof changePassword>>,
+    TError,
+    { data: ChangePasswordRequest },
+    TContext
+  >;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof changePassword>>,
+  TError,
+  { data: ChangePasswordRequest },
+  TContext
+> => {
+  const mutationKey = ["changePassword"];
+  const { mutation: mutationOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey } };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof changePassword>>,
+    { data: ChangePasswordRequest }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return changePassword(data);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ChangePasswordMutationResult = NonNullable<
+  Awaited<ReturnType<typeof changePassword>>
+>;
+export type ChangePasswordMutationBody = ChangePasswordRequest;
+export type ChangePasswordMutationError = unknown;
+
+/**
+ * @summary Change current user password
+ */
+export const useChangePassword = <TError = unknown, TContext = unknown>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof changePassword>>,
+      TError,
+      { data: ChangePasswordRequest },
+      TContext
+    >;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof changePassword>>,
+  TError,
+  { data: ChangePasswordRequest },
+  TContext
+> => {
+  const mutationOptions = getChangePasswordMutationOptions(options);
 
   return useMutation(mutationOptions, queryClient);
 };

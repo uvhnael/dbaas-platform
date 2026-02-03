@@ -4,27 +4,22 @@
  * OpenAPI definition
  * OpenAPI spec version: v0
  */
-import type { ClusterStatus } from "./clusterStatus";
+import type { ClusterResponseStatus } from "./clusterResponseStatus";
 
-export interface Cluster {
+export interface ClusterResponse {
   id?: string;
   name?: string;
-  userId?: string;
+  description?: string;
   mysqlVersion?: string;
   replicaCount?: number;
-  status?: ClusterStatus;
-  networkId?: string;
-  masterContainerId?: string;
-  proxySqlContainerId?: string;
-  replicaContainerIds?: string[];
-  errorMessage?: string;
+  status?: ClusterResponseStatus;
   dbUser?: string;
-  dbPassword?: string;
-  rootPassword?: string;
   proxyPort?: number;
-  description?: string;
   enableOrchestrator?: boolean;
   enableBackup?: boolean;
+  totalNodes?: number;
+  runningNodes?: number;
+  errorMessage?: string;
   createdAt?: string;
   updatedAt?: string;
 }

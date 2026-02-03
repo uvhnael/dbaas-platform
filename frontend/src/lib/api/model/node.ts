@@ -18,6 +18,7 @@ export interface Node {
   containerId?: string;
   cpuCores?: number;
   memory?: string;
+  storage?: string;
   readOnly?: boolean;
   createdAt?: string;
   updatedAt?: string;

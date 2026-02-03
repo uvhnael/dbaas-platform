@@ -5,11 +5,11 @@
  * OpenAPI spec version: v0
  */
 
-export type ClusterHealthResponseStatus =
-  (typeof ClusterHealthResponseStatus)[keyof typeof ClusterHealthResponseStatus];
+export type ClusterResponseStatus =
+  (typeof ClusterResponseStatus)[keyof typeof ClusterResponseStatus];
 
 // eslint-disable-next-line @typescript-eslint/no-redeclare
-export const ClusterHealthResponseStatus = {
+export const ClusterResponseStatus = {
   PROVISIONING: "PROVISIONING",
   HEALTHY: "HEALTHY",
   RUNNING: "RUNNING",
