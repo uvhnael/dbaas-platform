@@ -3,7 +3,7 @@
   "EnableSyslog": false,
   "ListenAddress": ":3000",
   "MySQLTopologyUser": "orchestrator",
-  "MySQLTopologyPassword": "orch_password",
+  "MySQLTopologyPassword": "0rchestrat0r_Secure_2026!",
   "MySQLTopologyCredentialsConfigFile": "",
   "MySQLTopologySSLPrivateKeyFile": "",
   "MySQLTopologySSLCertFile": "",
@@ -11,7 +11,7 @@
   "MySQLTopologySSLSkipVerify": true,
   "MySQLTopologyUseMutualTLS": false,
   "MySQLReplicaUser": "repl",
-  "MySQLReplicaPassword": "repl_password",
+  "MySQLReplicaPassword": "R3pl1cat10n_Secure_2026!",
   "BackendDB": "sqlite",
   "SQLite3DataFile": "/var/lib/orchestrator/orchestrator.db",
   "MySQLConnectTimeoutSeconds": 1,
@@ -39,7 +39,9 @@
   "HTTPAuthUser": "",
   "HTTPAuthPassword": "",
   "AuthUserHeader": "",
-  "PowerAuthUsers": ["*"],
+  "PowerAuthUsers": [
+    "*"
+  ],
   "ClusterNameToAlias": {},
   "ReplicationLagQuery": "",
   "DetectClusterAliasQuery": "SELECT SUBSTRING_INDEX(@@hostname, '-', 2)",
@@ -84,17 +86,21 @@
   "FailureDetectionPeriodBlockMinutes": 60,
   "RecoveryPeriodBlockSeconds": 60,
   "RecoveryIgnoreHostnameFilters": [],
-  "RecoverMasterClusterFilters": ["*"],
-  "RecoverIntermediateMasterClusterFilters": ["*"],
+  "RecoverMasterClusterFilters": [
+    "*"
+  ],
+  "RecoverIntermediateMasterClusterFilters": [
+    "*"
+  ],
   "OnFailureDetectionProcesses": [
-    "echo 'Detected {failureType} on {failureCluster}. Affected replicas: {countSlaves}' >> /var/log/orchestrator/detection.log"
+    "mkdir -p /var/log/orchestrator && echo 'Detected {failureType} on {failureCluster}. Affected replicas: {countSlaves}' >> /var/log/orchestrator/detection.log"
   ],
   "PreFailoverProcesses": [
-    "echo 'Starting failover for {failureCluster}' >> /var/log/orchestrator/failover.log"
+    "mkdir -p /var/log/orchestrator && echo 'Starting failover for {failureCluster}' >> /var/log/orchestrator/failover.log"
   ],
   "PostFailoverProcesses": [
-    "echo 'Failover complete. New master: {successorHost}:{successorPort}' >> /var/log/orchestrator/failover.log",
-    "curl -X POST http://dbaas-api:8080/api/webhooks/orchestrator/failover -H 'Content-Type: application/json' -d '{\"FailureType\":\"{failureType}\",\"FailureCluster\":\"{failureCluster}\",\"SuccessorHost\":\"{successorHost}\",\"SuccessorPort\":\"{successorPort}\"}'"
+    "mkdir -p /var/log/orchestrator && echo 'Failover complete. New master: {successorHost}:{successorPort}' >> /var/log/orchestrator/failover.log",
+    "curl -s -X POST -H 'Content-Type: application/json' -d '{\"SuccessorHost\": \"{successorHost}\", \"SuccessorPort\": \"{successorPort}\", \"FailedHost\": \"{failedHost}\", \"FailureType\": \"{failureType}\", \"ClusterAlias\": \"{clusterAlias}\"}' http://host.docker.internal:8080/api/v1/webhooks/orchestrator/failover || echo 'Webhook call failed' >> /var/log/orchestrator/failover.log"
   ],
   "PostUnsuccessfulFailoverProcesses": [],
   "PostMasterFailoverProcesses": [],
